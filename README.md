@@ -1,8 +1,12 @@
 # Data Migration
 ## Introduction
-The code in this repository is used to migrate fund operation data from hundreds of Excel files into an alternative investment software suite called eFront. This source data is cleaned, transformed and output into an eFront Excel template so that it can be loaded into that software. This repository also contains code used to aggregate the data in various ways so that it can be analysed or sent to stakeholders (who would review/clean/categorise the data as required). 
+The code in this repository was used to migrate fund operation data from hundreds of Excel files into an alternative investment software suite called eFront. This source data was cleaned, transformed and output into an eFront Excel template so that it can be loaded into that software. Overall, more than 25,000 fund operations were imported. 
 
-Initially the requirements were simple and the results were required quickly. Over time the requirements have changed and become increasingly complex. As a result, the code is convoluted and long. It could be restructured into a more concise form, but this has not been done because we don't require this code to be maintained or reused. 
+![Data Transformation and Upload](https://user-images.githubusercontent.com/92265905/145561735-d5e8baf9-522f-4eee-87f5-cf0b48411f4b.jpg)
+
+The fund operation amounts were often classified using a text field in the source Excel files. This repository also contains code used to aggregate the data in various ways so that it can be analysed or sent to stakeholders so that it could be reviewed, cleaned, classified and checked. 
+
+Disclaimer: The code could be restructured into a more concise form! However, we did not require this code to be maintained or reused after the migration was complete, and as a result the emphasis was on speed rather than maintainability. 
 
 ## Key Files
 There are lots of different files in this repo. The most relevant files are:

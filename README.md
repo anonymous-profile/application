@@ -4,9 +4,9 @@ The code in this repository was used to migrate fund operation data from hundred
 
 ![image](https://user-images.githubusercontent.com/92265905/145563243-103bbe87-0f09-45c1-bf9d-76c1ad224f38.png)
 
-The fund operation amounts were often classified using a text field in the source Excel files. This repository also contains code used to aggregate the data in various ways so that it can be analysed or sent to stakeholders so that it could be reviewed, cleaned, classified and checked. 
+The fund operation amounts were often classified using a text field in the source Excel files. This repository also contains code used to aggregate the data so that it can be analysed internally or reviewed and classified by other stakeholders. 
 
-Disclaimer: The code could be restructured into a more concise form! However, we did not require this code to be maintained or reused after the migration was complete, and as a result the emphasis was on speed rather than maintainability. 
+Disclaimer: We did not require this code to be maintained or reused after the migration was complete. As a result, the emphasis was on speed rather than maintainability. This code could be definitely be restructured into a more concise form! 
 
 ## Key Files
 There are lots of different files in this repo. The most relevant files are:

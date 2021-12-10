@@ -5,6 +5,7 @@ import logging
 import datetime as dt
 from fuzzywuzzy import fuzz, process
 from re import search
+import time
 
 logger = logging.getLogger('root')
 ######################################################################################
@@ -25,9 +26,11 @@ def extract_funds(file_name,share,env='UAT'):
 
     # Get a list of funds under this share class
     if env == 'UAT':
-        fund_import_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/05 Funds.xlsx'
+        fund_import_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/05 Funds.xlsx'
+    elif env == 'PROD':
+        fund_import_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/05.1 Funds.xlsx'
     else:
-        fund_import_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/05 DEV Funds.xlsx'
+        fund_import_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/05 DEV Funds.xlsx'
     fund_import = pd.read_excel(fund_import_file, index_col=None, header=2, usecols='D:Q',sheet_name=share)[2:] # First fund is the management fund 
     fund_import = fund_import['Fund'].to_list()
     for fund in fund_import:
@@ -80,7 +83,8 @@ def extract_funds(file_name,share,env='UAT'):
             try:
                 df = xl.parse(sheet_name,usecols='A:B',nrows=6)
             except OverflowError:
-                logging.warning(f'Date error on {sheet_name}')
+                print(f'\t\t\tDate error on {sheet_name}')
+                logging.warning(f'\t\t\tDate error on {sheet_name}')
             
             if df.keys()[0] == 'Name' and 'Unnamed' not in df.keys()[1]:
                 # We've found a fund sheet. Now store it's details
@@ -89,8 +93,8 @@ def extract_funds(file_name,share,env='UAT'):
                 # Match what's in the sheet against what's in the official fund import file and find the right match 
                 fund_name = process.extractOne(fund_name_compare,fund_import)[0]
                 if fund_name != fund_name_report:
-                    logging.info(f'\t\t\t{share}, {sheet_name}: From {fund_name_report} to {fund_name}')
-                    print(f'\t\t\t{sheet_name}: From {fund_name_report} to {fund_name}')
+                    logging.info(f'\t\t\t\t{share}, {sheet_name}: From {fund_name_report} to {fund_name}')
+                    print(f'\t\t\t\t{sheet_name}: From {fund_name_report} to {fund_name}')
 
                 fund_vintage = df.iloc[0,1]
 
@@ -174,7 +178,7 @@ def calc_fund_op_type(src_row,investee_fund=True):
                 fund_op_type = 'MF: Call'
             fund_op_code = 'CC'
         # Call is equal and opposite to fee 
-        elif (src_row['investments'] + src_row['fees'] == 0
+        elif (round(src_row['investments'],2) + round(src_row['fees'],2) == 0
         and src_row['investments'] != 0
         and src_row['fees'] != 0
         and src_row['return of capital'] == 0
@@ -199,7 +203,7 @@ def calc_fund_op_type(src_row,investee_fund=True):
         # IF: Distribution
         elif (src_row['investments'] == 0
         and src_row['fees'] == 0
-        and src_row['return of capital'] + src_row['capital gains'] != 0):
+        and round(src_row['return of capital'],2) + round(src_row['capital gains'],2) != 0):
             if investee_fund:
                 fund_op_type = 'IF: Distribution'
             else:
@@ -208,7 +212,7 @@ def calc_fund_op_type(src_row,investee_fund=True):
         # Return of Capital is equal and opposite to Capital Gain
         elif (src_row['investments'] == 0
         and src_row['fees'] == 0
-        and src_row['return of capital'] + src_row['capital gains'] == 0
+        and round(src_row['return of capital'],2) + round(src_row['capital gains'],2) == 0
         and src_row['return of capital'] != 0 
         and src_row['capital gains'] != 0):
             if investee_fund:
@@ -282,7 +286,7 @@ def calc_fund_op_type(src_row,investee_fund=True):
     except UnboundLocalError:
         print(src_row, investee_fund)
 
-def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,fx_rates=None,investee_fund=True):
+def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,month_end_dates,fx_rates=None,investee_fund=True):
     """ 
         Inputs:
             fund: the name of the fund 
@@ -298,6 +302,8 @@ def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,
     log_row_ind = False 
     categorised_ind = True
     negative_redraw_ind = False
+    fund_name_coinv = fund_name.replace('-','').lower()
+    shifted_to_month_end_ind = False
 
     # Work out the operation type
     fund_op_type, fund_op_code = calc_fund_op_type(src_row, investee_fund)
@@ -332,7 +338,7 @@ def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,
             'fair value': src_row_euros['latest accounting nav']
         } 
 
-        if file_name == 'X Shares' and fund_name == 'redacted' and src_row['date'] >= dt.date(2019,3,31):
+        if file_name == 'X Shares' and fund_name == 'Zodiac' and src_row['date'] >= dt.date(2019,3,31):
             accounting_nav_row = {
                 'commitment': 0,
                 'commitment_euros': None,
@@ -362,32 +368,24 @@ def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,
                              ,file_name                                     
                              ,accounting_nav_row    
                              ,accounting_nav_row_euros                                            
-                             ,dst_rows    
+                             ,dst_rows
+                             ,month_end_dates=month_end_dates    
                              ,fx_rates=fx_rates
                              ,investee_fund=investee_fund                                      
                              )                                                     
 
+    # No longer required as per email on 14/10/2021 'IRR and FX Rate Issues'
+    # Every time we find a call operation in the selection of funds, insert a commitment operation matching the existing
+    # if ((file_name == 'Q Shares' and fund_name in ['Neovia'])
+    #     or (file_name == 'S Shares' and fund_name in ['Global Knowledge'])
+    #     or (file_name == 'X Shares' and fund_name in ['14W','Garda World'])
+    #     or (file_name == 'Y Shares' and fund_name in ['Zodiac'])
+    # ):
+
     if src_row['commitment'] == 0:  
         src_row['commitment'] = None # We no longer need this to be 0 so set this to None so we don't insert zeros 
 
-    # if file_name == 'Y Shares' and investee_fund:
-    #     # for Y shares all call operations are just commitments 
-    #     investor  = f'{file_name} - LR'
-    #     fund = f'{file_name} - LR in {fund_name}' 
-    #     fund_op_type = 'IF: Commitment'
-    #     fund_op_code = ''
-    #     if src_row['investments'] is not None:
-    #         inv = src_row['investments']
-    #     else:
-    #         inv = 0
-    #     if src_row['fees'] is not None:
-    #         fee = src_row['fees']
-    #     else:
-    #         fee = 0
-    #     src_row['commitment'] = inv + fee
-    #     src_row['investments'] = 0 
-    #     src_row['fees'] = 0
-    if file_name in ['AGp Shares','AHp Shares','AHs Shares','AIp Shares','AIs Shares'] and investee_fund:
+    if file_name in ['AGp Shares','AHp Shares','AHs Shares','AIp Shares','AIs Shares','AGs Shares','AJp Shares','AJs Shares'] and investee_fund:
         file_name = file_name.replace('p ',' ')
         file_name = file_name.replace('s ',' ')
         investor  = f'{file_name} - LR'
@@ -458,32 +456,55 @@ def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,
             else:
                 fund_op_date = dt.date(src_row['date'].year,src_row['date'].month,src_row['date'].day)
 
-            if len(fx_rates_rounded.unique()) > 1:
-                # We have an fx_rate mismatch. This usually happens at the quarter end dates
-                month_end_date = dt.date(2022,3,31)
-                # This will create a list of all month end dates from 2005-11-30 to 2022-03-31
-                month_end_dates = [month_end_date - pd.DateOffset(months=(x*4)) for x in range(50)]
-                tomorrow = fund_op_date + pd.DateOffset(days=1)
-                if tomorrow in month_end_dates:
-                    # It's month end tomorrow so change the fund op date to tomorrow    
-                    logging.info(f"\t\tFund op date moved to month end for {fund_op_type} in {fund} on {fund_op_date} ({src_row['description']})")
-                    print(f"\t\tFund op date moved to month end for {fund_op_type} in {fund} on {fund_op_date} ({src_row['description']})")
-                    fund_op_date = tomorrow
-                    fx_rate = fx_rates_rounded[0]
-                else:
-                    log_fx_mismatch(file_name
-                                   ,fund_op_type
-                                   ,fund
-                                   ,src_row
-                                   ,src_row_euros
-                                   ,fund_ccy
-                                   ,fx_rates
-                                   ,fx_investments
-                                   ,fx_fees
-                                   ,fx_return_of_capital
-                                   ,fx_capital_gains
-                                   ,fx_fair_value)
-                    fx_rate = None
+            # # Check if tomorrow is the month end
+            # month_end_date = dt.date(2022,3,31)
+            # # This will create a list of all month end dates from 2005-11-30 to 2022-03-31
+            # month_end_dates = [month_end_date - pd.DateOffset(months=(x*4)) for x in range(50)]
+            tomorrow = fund_op_date + pd.DateOffset(days=1)
+            fx_rate = fx_rates_rounded.unique()[0] # If there are multiple, we'll just choose the first one 
+            tomorrow = pd.to_datetime(tomorrow)
+            month_end_fx_rate = fx_rates.loc[(fx_rates['date']==tomorrow)&(fx_rates['dst_ccy']=='EUR')&(fx_rates['src_ccy']==fund_ccy),'rate']
+            import_fx_rate = fx_rates.loc[(fx_rates['date']==pd.to_datetime(fund_op_date))&(fx_rates['dst_ccy']=='EUR')&(fx_rates['src_ccy']==fund_ccy),'rate']
+            if len(import_fx_rate) > 0:
+                import_fx_rate = import_fx_rate.iloc[0]
+            else:
+                import_fx_rate = None
+            if len(month_end_fx_rate) == 1:
+                month_end_fx_rate = month_end_fx_rate.iloc[0]
+            else:
+                month_end_fx_rate = 0
+            month_end_fx_rate = round(month_end_fx_rate,4)
+
+            if tomorrow in month_end_dates and month_end_fx_rate in list(fx_rates_rounded.unique()): #fx_rate:
+                # It's month end tomorrow  and the fx_rate used was that of the month end so change the fund op date to tomorrow    
+                # Log the change 
+                month_end_fund_op = {'Share': investor,'Fund':fund_name,'Old Date':fund_op_date,'New Date': tomorrow,'Description':src_row['description'],'Type':fund_op_type}
+                month_end_fund_ops_doc = 'C:/Users/RajContractor/Documents/Python Files/Dev/LR Migration/Migrated/Support Files/Fund_Ops_Moved_To_Month_End.xlsx'
+                fund_op_date = tomorrow
+                shifted_to_month_end_ind = True
+                try:
+                    month_end_fund_ops = pd.read_excel(month_end_fund_ops_doc, index_col=None)
+                    month_end_fund_ops = month_end_fund_ops.append(month_end_fund_op, ignore_index=True)
+                except FileNotFoundError:
+                    month_end_fund_ops = pd.DataFrame()
+                    month_end_fund_ops = month_end_fund_ops.append(month_end_fund_op, ignore_index=True)
+                # Output everything to excel
+                month_end_fund_ops.to_excel(month_end_fund_ops_doc,index=False,columns=['Share','Fund','Old Date','New Date','Description','Type'])
+            elif len(fx_rates_rounded.unique()) > 1:
+                #  This shouldn't have happened - so log it
+                log_fx_mismatch(file_name
+                                ,fund
+                                ,src_row
+                                ,src_row_euros
+                                ,fund_ccy
+                                ,fx_rates
+                                ,fx_investments
+                                ,fx_fees
+                                ,fx_return_of_capital
+                                ,fx_capital_gains
+                                ,fx_fair_value
+                                ,month_end_fx_rate)
+                fx_rate = import_fx_rate
                 # fair_val_fx = round(src_row_euros['fair value']/src_row['fair value'],4)
                 # fx_rates_rounded = fx_rates_rounded[fx_rates_rounded != fair_val_fx]
                 # if len(fx_rates_rounded.unique()) != 1:
@@ -495,7 +516,10 @@ def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,
                 #     fx_rate = tot_investor_ccy/tot_fund_ccy
             elif len(fx_rates_rounded.unique()) == 1:
                 fx_rate = fx_rates_rounded.unique()[0]
+            elif import_fx_rate is not None and import_fx_rate == import_fx_rate and import_fx_rate != 0:
+                fx_rate = import_fx_rate
             else:
+                print('-------------------------',fx_rates_rounded)
                 fx_rate = None
 
             dst_row = {'fund_op_type': fund_op_type
@@ -529,6 +553,12 @@ def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,
                       ,'impairment_investor_ccy': None
                       ,'fx_rate': fx_rate
                       ,'orig_fee': src_row['fees']
+                      ,'shifted_to_month_end_ind': shifted_to_month_end_ind
+                      ,'investments': src_row['investments']
+                      ,'fees': src_row['fees']
+                      ,'return of capital': src_row['return of capital']
+                      ,'capital gains': src_row['capital gains']
+                      ,'fair value': src_row['fair value'] 
                       }
     except:
         logger.exception('Append failed!')
@@ -570,9 +600,31 @@ def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,
             change_undrawn_fund_ccy = 0
             change_undrawn_investor_ccy = 0
             
-        dst_row['change_undrawn_fund_ccy'] = change_undrawn_fund_ccy
-        dst_row['change_undrawn_investor_ccy'] = change_undrawn_investor_ccy
-        
+        if fund_ccy != 'EUR':
+            # Say you have fund op 1 with undrawn $100m and €80m (fx rate = 0.8)
+            # Then you have fund op 2 with undrawn $50m and €25m (fx rate = 0.5), due to a call operation of $50m inside commitment (equivalent to €25m)
+            # The change in undrawn has been €55m even though the call op inside commitment should be €25m 
+            # As a result, we can't use the change_undrawn_investor_ccy to calculate anything. 
+            dst_row['change_undrawn_fund_ccy'] = change_undrawn_fund_ccy
+            if fx_rate is None:
+                # I don't think the below are necessary anymore. We should effectively be doing this earlier so that some usable fx_rate gets stored in dst_rows.
+                if import_fx_rate is not None:
+                    fx_rate = import_fx_rate
+                elif fx_rates_rounded.unique()[0] is not None:
+                    fx_rate = fx_rates_rounded.unique()[0]
+            if fx_rate is not None and fx_rate != 0:
+                change_undrawn_investor_ccy = round((change_undrawn_fund_ccy * fx_rate),2)
+            else:
+                # We weren't able to find the FX rate, so throw an error because we won't be able to calculate the undrawn delta. 
+                # Ignore Coinvestments because they have this issue a lot for some reason and their undrawn is a bit irrelevant anyway because it might need to go up with each call operation (investment+fee)
+                if fund_op_date < dt.date(2021,9,30) and 'coinv' not in fund_name_coinv:
+                    print(f"\t\tWarning: Error in calculating undrawn delta: {fund_op_type}, {fund_op_date}, {fx_rate}, {change_undrawn_fund_ccy}, {import_fx_rate}, {fx_rates_rounded.unique()[0]}")
+                    logging.warning(f"\t\tWarning: Error in calculating undrawn delta: {fund_op_type}, {fund_op_date}, {fx_rate}, {change_undrawn_fund_ccy}")
+            dst_row['change_undrawn_investor_ccy'] = change_undrawn_investor_ccy
+        else:     
+            dst_row['change_undrawn_fund_ccy'] = change_undrawn_fund_ccy
+            dst_row['change_undrawn_investor_ccy'] = change_undrawn_investor_ccy
+            
         net_change_undrawn_fund_ccy = round((change_undrawn_fund_ccy + dst_row['investments_fund_ccy']),2)
         net_change_undrawn_investor_ccy = round((change_undrawn_investor_ccy + dst_row['investments_investor_ccy']),2)
 
@@ -655,8 +707,8 @@ def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,
                 dst_row['fees_investor_ccy_inside_commitment'] = dst_row['fees_investor_ccy']
                 dst_row['fees_fund_ccy'] = 0
                 dst_row['fees_investor_ccy'] = 0
-                dst_row['redraw_fund_ccy'] = dst_row['roc_fund_ccy'] + dst_row['capital_gains_fund_ccy']
-                dst_row['redraw_investor_ccy'] = dst_row['roc_investor_ccy'] + dst_row['capital_gains_investor_ccy']
+                dst_row['redraw_fund_ccy'] = abs(dst_row['roc_fund_ccy'] + dst_row['capital_gains_fund_ccy'])
+                dst_row['redraw_investor_ccy'] = abs(dst_row['roc_investor_ccy'] + dst_row['capital_gains_investor_ccy'])
             else:
                 log_row_ind = True 
                 categorised_ind = False   
@@ -677,12 +729,21 @@ def append_row(fund_name, fund_ccy, file_name, src_row, src_row_euros, dst_rows,
     # if dst_row['fees_fund_ccy_inside_commitment'] != 0 and dst_row['fees_fund_ccy'] != 0:
     #     print(f"\t\tWarning: row where fee is not fully in or outside commitment: {dst_row['fund']},{dst_row['date']},{dst_row['description']},{src_row['investments']},{src_row['fees']},{src_row['return of capital']},{src_row['capital gains']},{src_row['fair value']},{-round(change_undrawn_fund_ccy,2)}")
     #     logging.warning(f"\t\tWarning: row where fee is not fully in or outside commitment: {dst_row['fund']},{dst_row['date']},{dst_row['description']},{src_row['investments']},{src_row['fees']},{src_row['return of capital']},{src_row['capital gains']},{src_row['fair value']},{-round(change_undrawn_fund_ccy,2)}")
+    try: 
+        if 'coinv' not in fund_name_coinv:
+            if dst_row['change_undrawn_fund_ccy'] != 0 and dst_row['change_undrawn_investor_ccy'] != 0 and abs(round((fx_rate*dst_row['change_undrawn_fund_ccy'])) - round(dst_row['change_undrawn_investor_ccy'])) > 1: 
+                #round((dst_row['fx_rate']*dst_row['change_undrawn_fund_ccy'])) != round(dst_row['change_undrawn_investor_ccy']):
+                print(f"\t\tWarning: Undrawn delta for fund ccy does not match undrawn delta for investor ccy: {dst_row['fund']},{dst_row['date']},{dst_row['description']},{src_row['investments']},{src_row['fees']},{src_row['return of capital']},{src_row['capital gains']},{src_row['fair value']},{-round(change_undrawn_fund_ccy,2)} - {round((fx_rate*dst_row['change_undrawn_fund_ccy']))} - {round(dst_row['change_undrawn_investor_ccy'])}")
+                logging.warning(f"\t\tWarning: Undrawn delta for fund ccy does not match undrawn delta for investor ccy: {dst_row['fund']},{dst_row['date']},{dst_row['description']},{src_row['investments']},{src_row['fees']},{src_row['return of capital']},{src_row['capital gains']},{src_row['fair value']},{-round(change_undrawn_fund_ccy,2)} - {round((fx_rate*dst_row['change_undrawn_fund_ccy']))} - {round(dst_row['change_undrawn_investor_ccy'])}")
+    except TypeError:
+            print(f"\t\tWarning: Undrawn delta for fund ccy does not match undrawn delta for investor ccy: {dst_row['fund']},{dst_row['date']},{dst_row['description']},{src_row['investments']},{src_row['fees']},{src_row['return of capital']},{src_row['capital gains']},{src_row['fair value']},{-round(change_undrawn_fund_ccy,2)} - {round(dst_row['change_undrawn_investor_ccy'])}")
+            logging.warning(f"\t\tWarning: Undrawn delta for fund ccy does not match undrawn delta for investor ccy: {dst_row['fund']},{dst_row['date']},{dst_row['description']},{src_row['investments']},{src_row['fees']},{src_row['return of capital']},{src_row['capital gains']},{src_row['fair value']},{-round(change_undrawn_fund_ccy,2)} - {round(dst_row['change_undrawn_investor_ccy'])}")
 
     dst_rows = dst_rows.append(dst_row, ignore_index=True)
 
     if log_row_ind:
         # Location of the file 
-        uncategorised_fees_cap_gains = 'C:/Users/AnonAnon/Documents/Python Files/Dev/LR Migration/Migrated/Fees and Return of Capital Categorisation.xlsx'
+        uncategorised_fees_cap_gains = 'C:/Users/RajContractor/Documents/Python Files/Dev/LR Migration/Migrated/Support Files/Fees and Return of Capital Categorisation.xlsx'
         # Add relevant columns
         src_row['fees_outside_commitment'] = dst_row['fees_fund_ccy']
         src_row['fees_inside_commitment'] = dst_row['fees_fund_ccy_inside_commitment']
@@ -812,6 +873,10 @@ def insert_row(dst_row, dst_row_num, dst_active_sheet, investee_fund=True):
             dst_active_sheet[f'DS{dst_row_num}'] = dst_row['fair_value_fund_ccy']                                   # -------------------------------------- Investors (BP).Share Valuation
             dst_active_sheet[f'DU{dst_row_num}'] = dst_row['fair_value_investor_ccy']                               # -------------------------------------- Investors (BP).Investor Valuation
             dst_active_sheet[f'DV{dst_row_num}'] = dst_row['fair_value_op_ccy']                                     # -------------------------------------- Investors (BP).Op Valuation
+            if dst_row['sub_close_interest_call_fund_ccy_inside_commitment'] is not None and dst_row['sub_close_interest_call_fund_ccy_inside_commitment'] > 0:
+                print("\t\tError: Subsequent Close Interest INSIDE Commitment")
+            # dst_active_sheet[f'??{dst_row_num}'] = dst_row['sub_close_interest_call_fund_ccy_inside_commitment']    # -------------------------------------- Investors (BP).Share Call: Subsequent Close Interest outside commitment
+            # dst_active_sheet[f'??{dst_row_num}'] = dst_row['sub_close_interest_call_investor_ccy_inside_commitment']  # -------------------------------------- Investors (BP).Investor Call: Subsequent Close Interest outside commitment
             dst_active_sheet[f'ED{dst_row_num}'] = dst_row['sub_close_interest_call_fund_ccy']                      # -------------------------------------- Investors (BP).Share Call: Subsequent Close Interest outside commitment
             dst_active_sheet[f'EF{dst_row_num}'] = dst_row['sub_close_interest_call_investor_ccy']                  # -------------------------------------- Investors (BP).Investor Call: Subsequent Close Interest outside commitment
             dst_active_sheet[f'EG{dst_row_num}'] = dst_row['sub_close_interest_call_op_ccy']                        # -------------------------------------- Investors (BP).Op Call: Subsequent Close Interest outside commitment
@@ -837,6 +902,7 @@ def insert_row(dst_row, dst_row_num, dst_active_sheet, investee_fund=True):
             dst_active_sheet[f'FF{dst_row_num}'] = dst_row['impairment_investor_ccy']                               # -------------------------------------- Investors (BP).Investor Impairment
             dst_active_sheet[f'FG{dst_row_num}'] = dst_row['impairment_op_ccy']                                     # -------------------------------------- Investors (BP).Op Impairment
             dst_active_sheet[f'FH{dst_row_num}'] = dst_row['impairment_fund_ccy']                                   # -------------------------------------- Investors (BP).Share Impairment
+            dst_active_sheet[f'FI{dst_row_num}'] = dst_row['IQID']                                                  # -------------------------------------- eFront Internal ID
         else:
             # Insert the values in the destination row 
             dst_active_sheet[f'C{dst_row_num}'] = dst_row['fund_op_type']                   # -------------------------------------- Type    
@@ -938,7 +1004,7 @@ def compile_data(src_file, file_name,fx_rates=None,env='UAT'):
 
     # Read in the investors in each share and assign the best matching name to each fund in dst_rows 
     print(file_name)
-    if file_name in ['AGp Shares','AHp Shares','AHs Shares','AIp Shares','AIs Shares']:
+    if file_name in ['AGp Shares','AHp Shares','AHs Shares','AIp Shares','AIs Shares','AGs Shares','AJp Shares','AJs Shares']:
         file_name = file_name.replace('p ',' ')
         file_name = file_name.replace('s ',' ')
 
@@ -947,8 +1013,9 @@ def compile_data(src_file, file_name,fx_rates=None,env='UAT'):
 
     fund_details, fund_sheets, fund_sheets_euros, all_fund_sheets = extract_funds(src_file,share,env=env)
 
-
-
+    # This will create a list of all month end dates from 2005-11-30 to 2022-03-31
+    month_end_dates = [dt.date(2022,3,31) - pd.DateOffset(months=(x*3)) for x in range(100)]
+    
     # loop through our funds
     logger.info('...Working On:')
     print('...Working On:')
@@ -987,6 +1054,7 @@ def compile_data(src_file, file_name,fx_rates=None,env='UAT'):
                              ,src_row    
                              ,src_row       
                              ,dst_rows
+                             ,month_end_dates=month_end_dates
                              ,fx_rates=fx_rates
                              ,investee_fund=True)
 
@@ -1083,6 +1151,7 @@ def compile_data(src_file, file_name,fx_rates=None,env='UAT'):
                                          ,src_row    
                                          ,src_row_euros       
                                          ,dst_rows
+                                         ,month_end_dates=month_end_dates
                                          ,fx_rates=fx_rates
                                          ,investee_fund=True)
 
@@ -1107,7 +1176,7 @@ def compile_data(src_file, file_name,fx_rates=None,env='UAT'):
 
     ################################################################################################################################################################################################################
     # Categorise each fee and capital gain based on the ones that Jenny + I were able to categorise 
-    # descriptions_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Data Migration/Investee Fund Operation Compilation Files/Compilation - All Fees, Return of Capital and Capital Gains.xlsx'
+    # descriptions_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Data Migration/Investee Fund Operation Compilation Files/Compilation - All Fees, Return of Capital and Capital Gains.xlsx'
     # desc_xl = pd.ExcelFile(descriptions_file)
     # for sheet in desc_xl.book.worksheets:
     #     if sheet.title == 'Fees':
@@ -1118,33 +1187,116 @@ def compile_data(src_file, file_name,fx_rates=None,env='UAT'):
     # dst_rows = categorise_fees_cap_gains(dst_rows,desc_fees,desc_cap_gains)
     ################################################################################################################################################################################################################
 
-    # Find the rows where we weren't able to figure out which amounts were in/outside commitment or recallable and categorise them 
+    # Find the rows where we weren't able to figure out which amounts were in/outside commitment or recallable and categorise them
+    dst_rows['date'] = dst_rows['date'].apply(lambda x: dt.datetime(x.year,x.month,x.day))
+    # Allocate what portion of fees should be in vs out of commitment and what fraction of the distribution is redrawable where we haven't been able to do so automatically
     dst_rows = integrate_misc_categorisation_files(dst_rows)
 
+    # Some impairment operations get 'categorised' in the integrate_LR_compilation_file too, but we do them here because not all funds have been categorised
+    for dst_row in dst_rows.itertuples():
+        if ((round(dst_row.capital_gains_fund_ccy,2) + round(dst_row.roc_fund_ccy,2) == 0) 
+        and dst_row.fund_op_type != 'IF: Mixed operation'
+        and round(dst_row.roc_fund_ccy,2) != 0
+        and round(dst_row.capital_gains_fund_ccy,2) != 0):
+            # Don't worry about operation currency here as we'll add it in the add_op_cols function later. We want to add the cap gain amount here (should be -ve)
+            dst_rows.loc[dst_row.Index,'impairment_fund_ccy'] = dst_row.capital_gains_fund_ccy
+            dst_rows.loc[dst_row.Index,'impairment_investor_ccy'] = dst_row.capital_gains_investor_ccy
+            dst_rows.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
+            dst_rows.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
+            dst_rows.loc[dst_row.Index,'roc_fund_ccy'] = 0
+            dst_rows.loc[dst_row.Index,'roc_investor_ccy'] = 0
+            dst_rows.loc[dst_row.Index,'fund_op_type'] = 'IF: Impairment'
+    
     # Get the descriptions for categorising fees and capital gains as returned by LR, and add rows to dst_rows where we're splitting up an amount
-    dst_rows = integrate_LR_compilation_file(dst_rows)
+    # Create the new mapping columns 
+    dst_rows['mapping'] = None
+    dst_rows['fee_mapped_ind'] = False
+    dst_rows['dist_mapped_ind'] = False
+    dst_rows['fee_moved_ind'] = False
+    dst_rows['dist_moved_ind'] = False
+    dst_rows['newly_classified_ind'] = False
+
+    # Create new fee columns 
+    dst_rows['legal_fees_fund_ccy'] = None
+    dst_rows['legal_fees_investor_ccy'] = None
+    dst_rows['org_costs_fund_ccy'] = None
+    dst_rows['org_costs_investor_ccy'] = None
+    dst_rows['partnership_expenses_fund_ccy'] = None
+    dst_rows['partnership_expenses_investor_ccy'] = None
+    dst_rows['other_expenses_fund_ccy'] = None
+    dst_rows['other_expenses_investor_ccy'] = None
+    dst_rows['working_capital_fund_ccy'] = None
+    dst_rows['working_capital_investor_ccy'] = None
+    dst_rows['sub_close_interest_call_fund_ccy'] = None
+    dst_rows['sub_close_interest_call_investor_ccy'] = None
+    dst_rows['legal_fees_fund_ccy_inside_commitment'] = None
+    dst_rows['legal_fees_investor_ccy_inside_commitment'] = None
+    dst_rows['org_costs_fund_ccy_inside_commitment'] = None
+    dst_rows['org_costs_investor_ccy_inside_commitment'] = None
+    dst_rows['partnership_expenses_fund_ccy_inside_commitment'] = None
+    dst_rows['partnership_expenses_investor_ccy_inside_commitment'] = None
+    dst_rows['other_expenses_fund_ccy_inside_commitment'] = None
+    dst_rows['other_expenses_investor_ccy_inside_commitment'] = None
+    dst_rows['working_capital_fund_ccy_inside_commitment'] = None
+    dst_rows['working_capital_investor_ccy_inside_commitment'] = None
+    dst_rows['sub_close_interest_call_fund_ccy_inside_commitment'] = None
+    dst_rows['sub_close_interest_call_investor_ccy_inside_commitment'] = None
+    
+    # Create new distribution columns 
+    dst_rows['dividend_fund_ccy'] = None
+    dst_rows['dividend_investor_ccy'] = None
+    dst_rows['interest_fund_ccy'] = None
+    dst_rows['interest_investor_ccy'] = None
+    dst_rows['other_income_fund_ccy'] = None
+    dst_rows['other_income_investor_ccy'] = None
+    dst_rows['realised_gain_fund_ccy'] = None
+    dst_rows['realised_gain_investor_ccy'] = None
+    dst_rows['withholding_tax_fund_ccy'] = None
+    dst_rows['withholding_tax_investor_ccy'] = None
+    dst_rows['carry_fund_ccy'] = None
+    dst_rows['carry_investor_ccy'] = None
+    dst_rows['sub_close_interest_dist_fund_ccy'] = None
+    dst_rows['sub_close_interest_dist_investor_ccy'] = None
+
+    # Do the first batch
+    comp_file_lr = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Data Migration/Investee Fund Operation Compilation Files/Returned by LR/Compilation_LR_Clean_1.xlsx'
+    dst_rows = integrate_LR_compilation_file(dst_rows,comp_file_lr,month_end_dates)
+
+    # Do the second batch
+    comp_file_lr = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Data Migration/Investee Fund Operation Compilation Files/Returned by LR/Compilation_LR_Clean_2.xlsx'
+    dst_rows = integrate_LR_compilation_file(dst_rows,comp_file_lr,month_end_dates)
+
+    # Do the third batch
+    comp_file_lr = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Data Migration/Investee Fund Operation Compilation Files/Returned by LR/Compilation_LR_Clean_3.xlsx'
+    dst_rows = integrate_LR_compilation_file(dst_rows,comp_file_lr,month_end_dates)
+
+    # Do the fourth batch
+    comp_file_lr = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Data Migration/Investee Fund Operation Compilation Files/Returned by LR/Compilation_LR_Clean_4.xlsx'
+    dst_rows = integrate_LR_compilation_file(dst_rows,comp_file_lr,month_end_dates)
+    print(f'\tNumber of newly classified rows: {len(dst_rows[dst_rows["newly_classified_ind"] == True])}')
 
     # Add index column (number the fund ops of the same type happening on the same day)
-    ind = dst_rows.groupby(['investor'
-                            ,'fund'
-                            ,'fund_name'
-                            ,'op_currency'
+    ind = dst_rows.groupby(['fund'
+                            #,'investor'
+                            #,'fund_name'
+                            #,'op_currency'
                             #,'fund_op_type' # eFront for some reason updates instead of inserting if there is a call and return of call on the same date with index = 1 
                             #,'fund_op_code'
-                            ,'date'
-                            ,'settlement_date']).cumcount()
+                            ,'date']).cumcount()
     ind = ind.apply(lambda x: x + 1)
     dst_rows['index'] = ind
 
     # Add Locked column
-    dst_rows['locked'] = 'FALSE'
-    #dst_rows.loc[dst_rows['date'] >= dt.datetime(2021, 1, 1), 'locked'] = 'FALSE'
-
+    dst_rows['locked'] = 'TRUE'
+    dst_rows.loc[dst_rows['date'] >= dt.datetime(2021, 1, 1), 'locked'] = 'FALSE'
+    
+    
     # Add op_ccy cols
     dst_rows = add_op_cols(dst_rows)
 
     # Not sure why but some empty rows are there at the end sometimes - e.g. AB Shares
     dst_rows = dst_rows[dst_rows.fund_op_type.notnull()]
+
 
     # Round everything to 2 d.p. Some of the values will already be rounded to 2 d.p. in the 'append' function
     fx_rate = dst_rows['fx_rate'] # We don't want to round fx rates, so store that 
@@ -1152,16 +1304,21 @@ def compile_data(src_file, file_name,fx_rates=None,env='UAT'):
     dst_rows = dst_rows.round(2) # Round the rows to 2 d.p.
     dst_rows.replace(0,np.nan,inplace=True) # Replace 0s with nulls again. Important for valuations, so we don't accidentally enter a valuation of 0
     dst_rows['fx_rate'] = fx_rate # replace the fx_rates column to the pre-rounded figures 
-  
+
+    # Temp workaround for prod - 08.12.2021 
+    dst_rows['locked'] = 'FALSE'                                        # Unlock all rows
+    dst_rows = dst_rows[dst_rows['date'] <= dt.datetime(2021, 9, 30)]   # Only upload fund ops pre 30th Sept 2021
+    dst_rows.loc[(dst_rows['redraw_fund_ccy']<0),'redraw_fund_ccy'] = -dst_rows.loc[(dst_rows['redraw_fund_ccy']<0),'redraw_fund_ccy']
+    dst_rows.loc[(dst_rows['redraw_investor_ccy']<0),'redraw_investor_ccy'] = -dst_rows.loc[(dst_rows['redraw_investor_ccy']<0),'redraw_investor_ccy']    
 
     # Only for testing: Check if latest fund op is Accounting NAV. if it is, insert Official NAV 
-    for fund in list(dst_rows['fund_name'].unique()):
-        dst_rows_fund = dst_rows[dst_rows['fund_name'] == fund]
-        if dst_rows_fund['fund_op_type'].iloc[-1] == 'IF: Accounting Valuation': 
-            dst_row = dst_rows_fund.iloc[-1].copy()
-            dst_row['fund_op_type'] = 'IF: Official NAV'
-            dst_row['index'] = dst_row['index'] + 1
-            dst_rows = dst_rows.append(dst_row,ignore_index=True)
+    # for fund in list(dst_rows['fund_name'].unique()):
+    #     dst_rows_fund = dst_rows[dst_rows['fund_name'] == fund]
+    #     if dst_rows_fund['fund_op_type'].iloc[-1] == 'IF: Accounting Valuation': 
+    #         dst_row = dst_rows_fund.iloc[-1].copy()
+    #         dst_row['fund_op_type'] = 'IF: Official NAV'
+    #         dst_row['index'] = dst_row['index'] + 10 # Accounting NAVs will be at the end
+    #         dst_rows = dst_rows.append(dst_row,ignore_index=True)
 
     # Sort the rows
     dst_rows.sort_values(by=['fund_name','date','fund_op_type','index'],inplace=True,ignore_index=True) 
@@ -1341,7 +1498,7 @@ def log_uncategorised_fund_ops(fund_name, file_name, src_row):
         Insert the src row in a separate file for reference
     """
     # Location of the file 
-    other_fund_operations_src = 'C:/Users/AnonAnon/Documents/Python Files/Dev/LR Migration/Migrated/Other Fund Operations Src.xlsx'
+    other_fund_operations_src = 'C:/Users/RajContractor/Documents/Python Files/Dev/LR Migration/Migrated/Support Files/Other Fund Operations Src.xlsx'
 
     # Read in what's there and add the new row 
     src_row['fund'] = fund_name 
@@ -1363,7 +1520,7 @@ def separate_other_fund_ops(dst_row):
         Insert the dst row in a separate file so we can categorise and import it later
     """
     # Location of the file 
-    other_fund_operations_dst = 'C:/Users/AnonAnon/Documents/Python Files/Dev/LR Migration/Migrated/Other Fund Operations.xlsx'
+    other_fund_operations_dst = 'C:/Users/RajContractor/Documents/Python Files/Dev/LR Migration/Migrated/Support Files/Other Fund Operations.xlsx'
     
     # Read in what's there and add the new row 
     try:
@@ -1376,11 +1533,10 @@ def separate_other_fund_ops(dst_row):
     # Output everything to excel
     other_fund_ops_dst.to_excel(other_fund_operations_dst,index=False)
 
-def log_fx_mismatch(file_name,fund_op_type, fund,src_row,src_row_euros,fund_ccy,fx_rates,fx_investments,fx_fees,fx_return_of_capital,fx_capital_gains,fx_fair_value):
+def log_fx_mismatch(file_name,fund,src_row,src_row_euros,fund_ccy,fx_rates,fx_investments,fx_fees,fx_return_of_capital,fx_capital_gains,fx_fair_value,month_end_fx_rate):
     """
         Inputs:
             file_name: same as the share class 
-            fund_op_type: the type of fund operation containing the fx rate mismatch
             fund: the fund containing the above fund operation
             src_row: the source data row that contains the fx rate mismatch
             src_row_euros: as above but contains the euros amounts
@@ -1389,15 +1545,15 @@ def log_fx_mismatch(file_name,fund_op_type, fund,src_row,src_row_euros,fund_ccy,
         Insert the source row in a separate file so we can send to LR
     """
     # Location of the file 
-    fx_rate_mismatch_doc = 'C:/Users/AnonAnon/Documents/Python Files/Dev/LR Migration/Migrated/FX_Rate_Mismatch.xlsx'
+    fx_rate_mismatch_doc = 'C:/Users/RajContractor/Documents/Python Files/Dev/LR Migration/Migrated/Support Files/FX_Rate_Mismatch.xlsx'
 
     # Convert to dataframe
-    fx_rates = fx_rates[(fx_rates['src_ccy']==fund_ccy)&(fx_rates['dst_ccy']=='EUR')&(fx_rates['date']==src_row['date'])]['rate'].values
-    if len(fx_rates) != 1:
-        if src_row['date'] <= dt.datetime(2021,3,31):
+    official_fx_rates = fx_rates[(fx_rates['src_ccy']==fund_ccy)&(fx_rates['dst_ccy']=='EUR')&(fx_rates['date']==src_row['date'])]['rate'].values
+    if len(official_fx_rates) != 1:
+        if src_row['date'] <= dt.datetime(2021,9,30):
             print(f"\t\tNo FX Rate imported for {src_row['date']}")
-    elif src_row['date'] <= dt.datetime(2021,3,31):
-        fx_rate = fx_rates[0]
+    elif src_row['date'] <= dt.datetime(2021,9,30):
+        fx_rate = official_fx_rates[0]
         fx_rate = round(fx_rate,4)
         if fx_investments is not None:
             fx_investments = round(fx_investments,4)
@@ -1414,7 +1570,8 @@ def log_fx_mismatch(file_name,fund_op_type, fund,src_row,src_row_euros,fund_ccy,
                         ,'Fund':[fund]
                         ,'Date':[src_row['date']]
                         ,'Description':[src_row['description']]
-                        ,'Expected Fx Rate':[fx_rate] 
+                        ,'Expected Fx Rate':[fx_rate]
+                        ,'Month End Fx Rate':[month_end_fx_rate] 
                         ,'Investment Fund CCY':[src_row['investments']]
                         ,'Investment Investor CCY':[src_row_euros['investments']]
                         ,'Investment Fx Rate':[fx_investments]
@@ -1455,9 +1612,270 @@ def replace_fund_name(share,fund_name_report):
         Output:
             fund_name_compare - this is the name we should use in our comparison with the official Fund import file 
     """
-    # Redacted for data protection
+    # Based on LR's emails, AachenMünchener Lebensversicherung AG was renamed to Generali Deutschland Lebensversicherung AG
+    fund_name_report = fund_name_report.replace('AachenMünchener Lebensversicherung AG', 'Generali Deutschland Lebensversicherung AG')
+    fund_name_report = fund_name_report.replace('AachenMunchener Lebensversicherung AG', 'Generali Deutschland Lebensversicherung AG')
+
+    if share == 'AH':
+        fund_name_report = fund_name_report.replace('NVP I Co-Invest SCSp', 'Novalpina I Co-Invest')
+       # fund_name_report = fund_name_report.replace('NB Renaissance Partners III', 'Neuberger Berman Renaissance Partners III - Fund')
+        fund_name_report = fund_name_report.replace('Stirling Square Capital Partners Fund IV - Coinv', 'Stirling Square Capital Partners Fund IV - Coinvestment')
+        fund_name_report = fund_name_report.replace('PASF IV', 'Portfolio Advisor Seconday Fund IV')
+    elif share == 'AI':
+        fund_name_report = fund_name_report.replace('Novacap TMT VI Coinvestment', 'Novacap TMT VI Co-Investment')
+        fund_name_report = fund_name_report.replace('Antin Infrastructure Partners Co-Investment', 'Gauss Co-Invest')
+    elif share == 'N':
+        fund_name_report = fund_name_report.replace('Black River Food Fund 2 LP', 'ITV - Blackriver Food Fund 2')
+        fund_name_report = fund_name_report.replace('Permira I 4b', 'Permira Europe I L.P. 4B')
+        fund_name_report = fund_name_report.replace('Permira I 3', 'Permira Europe I L.P. 3 / L.P. 4')
+        fund_name_report = fund_name_report.replace('Advent B', 'Advent Euro-Italian Direct Investment Program L.P. - Class B')
+        fund_name_report = fund_name_report.replace('Permira II', 'Permira Europe II L.P. 2')
+        fund_name_report = fund_name_report.replace('MEIF', 'Macquarie European Infrastructure Fund L.P.')
+        fund_name_report = fund_name_report.replace('GSIP I', 'GS Infrastructure Partners I L.P.')
+        fund_name_report = fund_name_report.replace('GSMP V', 'GS Mezzanine Partners V Offshore LP')
+        fund_name_report = fund_name_report.replace('REI', 'Renewable Energy Investments')
+    elif share == 'O':
+        fund_name_report = fund_name_report.replace('Rhone III', 'Rhône Offshore Partners III L.P.')
+        fund_name_report = fund_name_report.replace('Rhone II', 'Rhône Offshore Partners II L.P.')
+        fund_name_report = fund_name_report.replace('21 CP III', '21 Centrale Partners III')
+        fund_name_report = fund_name_report.replace('Equinox II', 'Equinox Two S.C.A')
+        fund_name_report = fund_name_report.replace('CHF II', 'China Harvest Fund II L.P.')
+        fund_name_report = fund_name_report.replace('RIH', 'Renewable Investments Holding')
+        fund_name_report = fund_name_report.replace('21 CP IV', '21 Central Partners IV')
+        fund_name_report = fund_name_report.replace('Lehman Brothers II', 'Lehman Brothers Offshore Investment Partners II L.P.')
+    elif share in ['AA','AB','AC','AD','AE']:
+        fund_name_report = fund_name_report.replace('Coinv', 'Co-inv')
+        fund_name_report = fund_name_report.replace('coinv', 'co-inv')
+    elif share == 'AF':
+        fund_name_report = fund_name_report.replace('ACON Equity Partners IV - Coinvestment', 'ACON - Coinvestment')
+    elif share == 'W':
+        fund_name_report = fund_name_report.replace('JAB Consumer Fund II (follow on)', 'JAB Consumer Fund - Global Consumer Brands')
+
+
+
+
 
     return fund_name_report
+
+def extract_irrs(file_name,share,fund_irrs):
+    """ Inputs:
+            file_name: the absolute path to the source file
+        Extract the sheets that contain fund operations, along with details about the corresponding fund
+    """
+
+    print('...Extracting Data')
+    share = share.replace('shares','Shares')
+    
+
+    if share in ['AGp Shares','AHp Shares','AHs Shares','AIp Shares','AIs Shares','AGs Shares','AJp Shares','AJs Shares']:
+        share = share.replace('p ',' ')
+        share = share.replace('s ',' ')
+
+    share_backup = share
+    print(share_backup)
+    share = str.split(file_name)[0]
+    share = share.replace('LRI_','')
+    share = share.replace('p','')
+    share = share.replace('s','')
+    sheet_count = 1 # Count the sheets
+
+    # Define dictionaries we will populate
+    
+    
+    xl = pd.ExcelFile(file_name)
+
+    # Get a list of funds under this share class
+    fund_import_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/05.1 Funds.xlsx'
+    fund_import = pd.read_excel(fund_import_file, index_col=None, header=2, usecols='D:Q',sheet_name=share)[2:] # First fund is the management fund 
+    fund_import = fund_import['Fund'].to_list()
+    for fund in fund_import:
+        if search('.*- LR$',fund):
+            fund_import.remove(fund)
+    print(f'\t\t\t---Fund Name Replacements---')
+    # Loop through sheets
+    
+    for sheet in xl.book.worksheets:
+        sheet_name = sheet.title
+        if sheet.sheet_state == 'hidden':
+            # Ignore hidden sheets
+            pass
+        elif (share == 'N' 
+        # and sheet_name in n_funds_to_skip # According to email on 29/07/2021 we shouldn't import all the funds in N and O shares
+        and sheet_name not in [# There should be 7 funds we care about in N Shares
+                           'PeI4 (2)','PeI3 (2)','PeI4','PeI3'
+                          ,'MEIF (2)','MEIF'
+                          ,'GSCP (2)','GSCP (2) (€)','GSCP','GSCP (€)'
+                          ,'GSIP (2)','GSIP (2) (€)','GSIP','GSIP (€)'
+                          ,'Avista (2)','Avista (2) (€)','Avista','Avista (€)'
+                          ,'GSMP V (2)','GSMP V (2) (€)','GSMP V','GSMP V (€)'
+                          ,'Latour (2)','Latour']):
+            
+            pass 
+        elif (share == 'O' 
+        # and sheet_name in o_funds_to_skip)
+        and sheet_name not in [# There should be 15 funds we care about in O Shares
+                           'Ath (2)','Ath'
+                          ,'Rho (2)','Rho (2) (€)','Rho','Rho (€)'
+                          ,'RhoIII (2)','RhoIII'
+                          ,'CHF I (2)','CHF I (2) (€)','CHF I','CHF I (€)'
+                          ,'21CP III (2)','21CP III'
+                          ,'AstIV (2)','AstIV'
+                          ,'Mand (2)','Mand'
+                          ,'EqxII (2)','EqxII'
+                          ,'DGPA (2)','DGPA'
+                          ,'CHF II (2)','CHF II (2) (€)','CHF II','CHF II (€)'
+                          ,'RIH (2)','RIH'
+                          ,'21 CP IV (2)','21 CP IV'
+                          ,'Quercus (2)','Quercus'
+                          ,'InvI V (2)','InvI V'
+                          ,'InvI']):
+            # N and O shares have duplicate sheets that we need to ignore
+            pass 
+        else:
+            # Sheet is not hidden so read it in
+            
+            try:
+                df = xl.parse(sheet_name,usecols='A:L',nrows=8)
+            except OverflowError:
+                print(f'\t\t\tDate error on {sheet_name}')
+            
+            if df.keys()[0] == 'Name' and 'Unnamed' not in df.keys()[1]:
+                # We've found a fund sheet. Now store it's details
+                fund_name_report = df.keys()[1].strip()
+                fund_name_compare = replace_fund_name(share,fund_name_report)
+                # Match what's in the sheet against what's in the official fund import file and find the right match 
+                fund_name = process.extractOne(fund_name_compare,fund_import)[0]
+                if fund_name != fund_name_report:
+                    print(f'\t\t\t\t{sheet_name}: From {fund_name_report} to {fund_name}')
+
+                if ((share == 'N' and sheet_name not in ['PeI4','PeI3','MEIF','GSCP','GSCP (€)','GSIP','GSIP (€)','Avista','Avista (€)','GSMP V','GSMP V (€)','Latour'])
+                or (share == 'O' and sheet_name not in ['Ath','Rho','Rho (€)','RhoIII','CHF I','CHF I (€)','21CP III','AstIV','Mand','EqxII','DGPA','CHF II','CHF II (€)','RIH','21 CP IV','Quercus','InvI V'])):
+                    # These are the funds we need to stick a - LR in front of
+                    fund_name += ' - LR' 
+
+                fund_currency = df.iloc[5,1]    
+
+                if fund_currency == 'EUR' or '€' in sheet_name: 
+                    irr_euros = df.iloc[7,11] 
+                    irr = None
+                else:
+                    irr_euros = None
+                    irr = df.iloc[7,11] 
+                    
+                record = pd.DataFrame([[share_backup,fund_name,irr,irr_euros]],columns=['Share','Fund Name','IRR_Fund_ccy','IRR_Inv_ccy'])
+                fund_irrs = fund_irrs.append(record,ignore_index=True)
+    print(f'\t\t\t----------------------------')
+    return fund_irrs
+
+def extract_undrawn(file_name,share,fund_undrawns):
+    """ Inputs:
+            file_name: the absolute path to the source file
+        Extract the sheets that contain fund operations, along with details about the corresponding fund
+    """
+
+    print('...Extracting Data')
+    share = share.replace('shares','Shares')
+    
+
+    if share in ['AGp Shares','AHp Shares','AHs Shares','AIp Shares','AIs Shares','AGs Shares','AJp Shares','AJs Shares']:
+        share = share.replace('p ',' ')
+        share = share.replace('s ',' ')
+
+    share_backup = share
+    print(share_backup)
+    share = str.split(file_name)[0]
+    share = share.replace('LRI_','')
+    share = share.replace('p','')
+    share = share.replace('s','')
+    sheet_count = 1 # Count the sheets
+
+    # Define dictionaries we will populate
+    
+    
+    xl = pd.ExcelFile(file_name)
+
+    # Get a list of funds under this share class
+    fund_import_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/05.1 Funds.xlsx'
+    fund_import = pd.read_excel(fund_import_file, index_col=None, header=2, usecols='D:Q',sheet_name=share)[2:] # First fund is the management fund 
+    fund_import = fund_import['Fund'].to_list()
+    for fund in fund_import:
+        if search('.*- LR$',fund):
+            fund_import.remove(fund)
+    print(f'\t\t\t---Fund Name Replacements---')
+    # Loop through sheets
+    
+    for sheet in xl.book.worksheets:
+        sheet_name = sheet.title
+        if sheet.sheet_state == 'hidden':
+            # Ignore hidden sheets
+            pass
+        elif (share == 'N' 
+        # and sheet_name in n_funds_to_skip # According to email on 29/07/2021 we shouldn't import all the funds in N and O shares
+        and sheet_name not in [# There should be 7 funds we care about in N Shares
+                           'PeI4 (2)','PeI3 (2)','PeI4','PeI3'
+                          ,'MEIF (2)','MEIF'
+                          ,'GSCP (2)','GSCP (2) (€)','GSCP','GSCP (€)'
+                          ,'GSIP (2)','GSIP (2) (€)','GSIP','GSIP (€)'
+                          ,'Avista (2)','Avista (2) (€)','Avista','Avista (€)'
+                          ,'GSMP V (2)','GSMP V (2) (€)','GSMP V','GSMP V (€)'
+                          ,'Latour (2)','Latour']):
+            
+            pass 
+        elif (share == 'O' 
+        # and sheet_name in o_funds_to_skip)
+        and sheet_name not in [# There should be 15 funds we care about in O Shares
+                           'Ath (2)','Ath'
+                          ,'Rho (2)','Rho (2) (€)','Rho','Rho (€)'
+                          ,'RhoIII (2)','RhoIII'
+                          ,'CHF I (2)','CHF I (2) (€)','CHF I','CHF I (€)'
+                          ,'21CP III (2)','21CP III'
+                          ,'AstIV (2)','AstIV'
+                          ,'Mand (2)','Mand'
+                          ,'EqxII (2)','EqxII'
+                          ,'DGPA (2)','DGPA'
+                          ,'CHF II (2)','CHF II (2) (€)','CHF II','CHF II (€)'
+                          ,'RIH (2)','RIH'
+                          ,'21 CP IV (2)','21 CP IV'
+                          ,'Quercus (2)','Quercus'
+                          ,'InvI V (2)','InvI V'
+                          ,'InvI']):
+            # N and O shares have duplicate sheets that we need to ignore
+            pass 
+        else:
+            # Sheet is not hidden so read it in
+            
+            try:
+                df = xl.parse(sheet_name,usecols='A:L',nrows=8)
+            except OverflowError:
+                print(f'\t\t\tDate error on {sheet_name}')
+            
+            if df.keys()[0] == 'Name' and 'Unnamed' not in df.keys()[1]:
+                # We've found a fund sheet. Now store it's details
+                fund_name_report = df.keys()[1].strip()
+                fund_name_compare = replace_fund_name(share,fund_name_report)
+                # Match what's in the sheet against what's in the official fund import file and find the right match 
+                fund_name = process.extractOne(fund_name_compare,fund_import)[0]
+                if fund_name != fund_name_report:
+                    print(f'\t\t\t\t{sheet_name}: From {fund_name_report} to {fund_name}')
+
+                if ((share == 'N' and sheet_name not in ['PeI4','PeI3','MEIF','GSCP','GSCP (€)','GSIP','GSIP (€)','Avista','Avista (€)','GSMP V','GSMP V (€)','Latour'])
+                or (share == 'O' and sheet_name not in ['Ath','Rho','Rho (€)','RhoIII','CHF I','CHF I (€)','21CP III','AstIV','Mand','EqxII','DGPA','CHF II','CHF II (€)','RIH','21 CP IV','Quercus','InvI V'])):
+                    # These are the funds we need to stick a - LR in front of
+                    fund_name += ' - LR' 
+
+                fund_currency = df.iloc[5,1]    
+
+                if fund_currency == 'EUR' or '€' in sheet_name: 
+                    undrawn_euros = df.iloc[7,9] 
+                    undrawn = None
+                else:
+                    undrawn_euros = None
+                    undrawn = df.iloc[7,9] 
+                    
+                record = pd.DataFrame([[share_backup,fund_name,undrawn,undrawn_euros]],columns=['Share','Fund Name','Undrawn_Fund_ccy','Undrawn_Inv_ccy'])
+                fund_undrawns = fund_undrawns.append(record,ignore_index=True)
+    print(f'\t\t\t----------------------------')
+    return fund_undrawns     
 
 ######################################################################################
 #                                 Investee Fund Ops                                  #
@@ -1473,13 +1891,13 @@ def migrate_investee_data(src_file, dst_file, file_name,fx_rates, env):
         Migrate investee fund ops.
     """
     # Define the template 
-    template_file = 'C:/Users/AnonAnon/OneDrive - IT-Venture Ltd/Documents/Temp/N2. Fund Operations - Test Template.xlsx'
+    template_file = 'C:/Users/RajContractor/OneDrive - IT-Venture Ltd/Documents/Temp/N2. Fund Operations - Test Template.xlsx'
     wb = oxl.load_workbook(template_file)
     dst_active_sheet = wb.active
     dst_row_num = 5 # Ignore headers in the template 
     
     # Read in the 'other' fund operations already classified by LR. We're doing it here rather than in the function where this is needed so it's only read in once.
-    other_fund_op_file = 'C:/Users/AnonAnon/OneDrive - IT-Venture Ltd/Documents/Temp/Other Fund Operations.xlsx'
+    other_fund_op_file = 'C:/Users/RajContractor/OneDrive - IT-Venture Ltd/Documents/Temp/Other Fund Operations.xlsx'
     other_fund_ops = pd.read_excel(other_fund_op_file, index_col=None)
     other_fund_ops['fair_value'] = other_fund_ops['Fair Value']
 
@@ -1521,7 +1939,7 @@ def add_op_cols(dst_rows):
 
     # For stirling add the op ccy amounts
     for dst_row in dst_rows.itertuples():
-        if (dst_row.investor == 'AH Shares - LR') and (dst_row.fund_name == 'redacted'):
+        if (dst_row.investor == 'AH Shares - LR') and (dst_row.fund_name == 'Stirling Square Capital Partners Fund IV - Coinvestment'):
             dst_rows.loc[dst_row.Index,'commitment_op_ccy'] = dst_row.commitment_fund_ccy
             dst_rows.loc[dst_row.Index,'investments_op_ccy'] = dst_row.investments_fund_ccy
             dst_rows.loc[dst_row.Index,'legal_fees_op_ccy'] = dst_row.legal_fees_fund_ccy
@@ -1568,477 +1986,26 @@ def add_op_cols(dst_rows):
 
     return dst_rows
 
-def integrate_LR_compilation_file(dst_rows):
-    """ 
-        Inputs:
-            dst_rows: the processed data containing the fees we want to categorise
-        Get the categorised fees/capital gains data, add rows where one amount has been split in two and classify the fees/capital gains in our data  
-    """
-    # Read in Compilation data
-    comp_file_lr = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Data Migration/Investee Fund Operation Compilation Files/Returned by LR/Compilation_LR_Clean.xlsx'
-    comp_fees = pd.read_excel(comp_file_lr, index_col=None, sheet_name='Fees')
-    # All rows with non-zero capital gains from return of capital/fees sheet should have been copied to the Capital Gains sheet, so we don't need to read in the return of capital sheet
-    comp_cap_gains = pd.read_excel(comp_file_lr, index_col=None, sheet_name='Capital Gains')
-
-    # Make a copy of dst_rows, because we'll need a place to store our updated amounts
-    dst_rows_copy = dst_rows.copy()
-    dst_rows_copy['mapping'] = None
-
-    # Find the share we're interested in (i.e. the share of our source data) and replace s/p
-    share_src = dst_rows['investor'].unique()[0]
-    share_src = share_src.replace(' - LR','')
-    if share_src in ['AGp Shares','AHp Shares','AHs Shares','AIp Shares','AIs Shares']:
-        share_src = share_src.replace('s ',' ')
-        share_src = share_src.replace('p ',' ')
-
-    # Only keep the rows we're interested in
-    comp_fees_share = comp_fees[comp_fees['Share'] == share_src]
-    comp_fees_share = comp_fees_share[(comp_fees_share.Mapping != '?')&(comp_fees_share.Mapping == comp_fees_share.Mapping)]
-    comp_cap_gains_share = comp_cap_gains[comp_cap_gains['Share'] == share_src]
-    comp_cap_gains_share = comp_cap_gains_share[(comp_cap_gains_share.Mapping != '?')&(comp_cap_gains_share.Mapping == comp_cap_gains_share.Mapping)]
-
-    # Convert our date column to datetime in case it isn't already
-    dst_rows['date'] = dst_rows['date'].apply(lambda x: dt.datetime(x.year,x.month,x.day)) 
-    comp_fees_share['Date'] = comp_fees_share['Date'].apply(lambda x: dt.datetime(x.year,x.month,x.day))
-    comp_cap_gains_share['Date'] = comp_cap_gains_share['Date'].apply(lambda x: dt.datetime(x.year,x.month,x.day))
-
-    # Transfer all our capital gains mappings to dst_rows_copy
-    for row in comp_cap_gains_share.itertuples():
-        # Add "- LR" next to the fund name if in N and O shares 
-        fund = row.investee_fund
-        alt_fund = fund + ' - LR'
-
-        # Find the relevant row
-        if fund in dst_rows['fund_name'].to_list():
-            # Some shares are split into multiple files, and this row might correspond to a fund in the other file
-            relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == row.Date)&(dst_rows['description'] == row.Description)&(round(dst_rows['capital_gains_fund_ccy'],2) == round(row.cg_amount,2))].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # If N/O shares we might need to add - LR at the end of the fund
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == row.Date)&(dst_rows['description'] == row.Description)&(round(dst_rows['capital_gains_fund_ccy'],2) == round(row.cg_amount,2))].copy()
-            if len(relevant_row) != 1:
-                # maybe the capital gains amount has changed 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == row.Date)&(dst_rows['description'] == row.Description)].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == row.Date)&(dst_rows['description'] == row.Description)].copy()
-            if len(relevant_row) != 1:
-                # maybe the description has changed 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == row.Date)&(round(dst_rows['capital_gains_fund_ccy'],2) == round(row.cg_amount,2))].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == row.Date)&(round(dst_rows['capital_gains_fund_ccy'],2) == round(row.cg_amount,2))].copy()
-            if len(relevant_row) != 1:
-                # maybe the description and amount has changed 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == row.Date)].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == row.Date)].copy()
-            if len(relevant_row) != 1:
-                print(f"\t\tWarning: row not found for distributed amount - {row.Share} - {fund} - {row.Date} - {row.Description} - {row.roc_amount} - {row.cg_amount}")
-                logging.warning(f"\t\tWarning: row not found for distributed amount - {row.Share} - {fund} - {row.Date} - {row.Description} - {row.roc_amount} - {row.cg_amount}")
-            else:
-                if row.SplitInd == 1:
-                    # First row - update description and amount if applicable
-                    dst_rows_copy.loc[relevant_row.index,'capital_gains_fund_ccy'] = row.cg_amount
-                    dst_rows_copy.loc[relevant_row.index,'capital_gains_investor_ccy'] = round((row.cg_amount * dst_rows_copy.loc[relevant_row.index,'fx_rate']),2)
-                    dst_rows_copy.loc[relevant_row.index,'description'] = row.Description
-                    dst_rows_copy.loc[relevant_row.index,'mapping'] = row.Mapping
-                elif row.SplitInd > 1:
-                    # New fund op added 
-                    relevant_row['description'] = row.Description
-                    # The distribution has been split - this is not the first row, so create a copy of the relevant row and set all non-distribution values to 0
-                    relevant_row['investments_fund_ccy'] = 0
-                    relevant_row['investments_investor_ccy'] = 0
-                    relevant_row['fees_fund_ccy'] = 0
-                    relevant_row['fees_investor_ccy'] = 0
-                    relevant_row['fees_fund_ccy_inside_commitment'] = 0
-                    relevant_row['fees_investor_ccy_inside_commitment'] = 0
-                    relevant_row['roc_fund_ccy'] = 0
-                    relevant_row['roc_investor_ccy'] = 0
-                    relevant_row['capital_gains_fund_ccy'] = row.cg_amount
-                    relevant_row['capital_gains_investor_ccy'] = round((row.cg_amount * dst_rows_copy.loc[row.Index,'fx_rate']),2)
-                    
-                    # Update the fund op type as it may no longer be applicable 
-                    relevant_row['fund_op_type'] = 'IF: Distribution'
-                    relevant_row['fund_op_code'] = 'CD'
-                    relevant_row['mapping'] = row.Mapping
-                    dst_rows_copy = pd.concat([dst_rows_copy, relevant_row], ignore_index=True)
-                else:
-                    dst_rows_copy.loc[relevant_row.index,'description'] = row.Description
-                    dst_rows_copy.loc[relevant_row.index,'mapping'] = row.Mapping
-                
-    # Before we try to match the fees we need to strip the descriptions of any leading/trailing spaces and replace spaces with _
-    # https://stackoverflow.com/questions/69513863/identical-strings-dont-match-in-python-an-issue-with-spaces-leading-trailing          
-    dst_rows['old_description'] = dst_rows['description'].str.strip().apply(lambda x: '_'.join(x.split()))
-    comp_fees_share['old_description'] = comp_fees_share['old_description'].str.strip().apply(lambda x: '_'.join(x.split()))
-
-    # Transfer all our fee mappings to dst_rows_copy and split amounts/rows as appropriate 
-    for fee in comp_fees_share.itertuples():
-        fund = fee.investee_fund
-        alt_fund = fund + ' - LR'
-
-        if fund in dst_rows['fund_name'].to_list():
-            # Find the relevant row in our data
-            relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy'],2) == round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy'],2) == round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
-            if len(relevant_row) != 1:
-                # maybe the fee amount is inside commitment
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) == round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) == round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
-            if len(relevant_row) != 1:
-                # maybe the fee amount has changed
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy'],2) != round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy'],2) != round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
-            if len(relevant_row) != 1:
-                # maybe the fee amount is inside commitment and has changed 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) != round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) != round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
-            if len(relevant_row) != 1:
-                # maybe the description has changed
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy'],2) == round(fee.fee_amount,2))].copy() 
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy'],2) == round(fee.fee_amount,2))].copy()
-            if len(relevant_row) != 1:
-                # maybe the fee amount is inside commitment and the description has changed
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) == round(fee.fee_amount,2))].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) == round(fee.fee_amount,2))].copy()
-            if len(relevant_row) != 1:
-                # maybe the fee amount has changed and the description has changed
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy'],2) != round(fee.fee_amount,2))].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy'],2) != round(fee.fee_amount,2))].copy()
-            if len(relevant_row) != 1:
-                # maybe the fee amount is inside commitment and has changed and the description has changed 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) != round(fee.fee_amount,2))].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == fee.Date)&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) != round(fee.fee_amount,2))].copy()
-            if len(relevant_row) != 1 and fee.SplitInd != 0:
-                # the amount is not going to match because this row has been split 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&(dst_rows['date'] == fee.Date)&(dst_rows['old_description'].values[0] == fee.old_description)].copy()
-            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares'] and fee.SplitInd != 0:
-                # As above but look for a fund with - LR at the end 
-                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&(dst_rows['date'] == fee.Date)&(dst_rows['old_description'].values[0] == fee.old_description)].copy()
-            if len(relevant_row) != 1:
-                print(f"\t\tWarning: row not found for fee: {fee.Share} - {fund} - {fee.Date} - {fee.old_description} - {fee.fee_amount}")
-                logging.warning(f"\t\tWarning: row not found for fee: {fee.Share} - {fund} - {fee.Date} - {fee.old_description} - {fee.fee_amount}")
-            else:
-                # Get the index of the row in our source data
-                i = relevant_row.index.to_list()[0]
-
-                # Update the amounts 
-                if fee.SplitInd in [1,-1]:
-                    # The fee has been split - this is the first row
-                    # Update the description in case it has been changed
-                    dst_rows_copy.loc[i,'description'] = fee.Description
-                    # Update the amount
-                    if relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] != 0 and relevant_row.loc[i,'fees_fund_ccy'] == 0:
-                        # Find the ratio of the old amount to the new amount
-                        ratio = fee.fee_amount/relevant_row.loc[i,'fees_fund_ccy_inside_commitment']
-                        # Find the corresponding amount in the investor currency and apply the ratio to that
-                        investor_ccy_amount = ratio * relevant_row.loc[i,'fees_investor_ccy_inside_commitment']
-                        # Update the old amount
-                        dst_rows_copy.loc[i,'fees_fund_ccy_inside_commitment'] = round(fee.fee_amount,2)
-                        dst_rows_copy.loc[i,'fees_investor_ccy_inside_commitment'] = round(investor_ccy_amount,2)
-                    elif relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] == 0 and relevant_row.loc[i,'fees_fund_ccy'] != 0:
-                        # Find the ratio of the old amount to the new amount
-                        ratio = fee.fee_amount/relevant_row.loc[i,'fees_fund_ccy']
-                        # Find the corresponding amount in the investor currency and apply the ratio to that
-                        investor_ccy_amount = ratio * relevant_row.loc[i,'fees_investor_ccy']
-                        # Update the old amount
-                        dst_rows_copy.loc[i,'fees_fund_ccy'] = round(fee.fee_amount,2)
-                        dst_rows_copy.loc[i,'fees_investor_ccy'] = round(investor_ccy_amount,2)
-                    else:
-                        # We dont expect any rows in our compilation file corresponding to mixed fees, so throw an error if we end up here
-                        print(relevant_row.loc[i,'date'], relevant_row.loc[i,'description'], relevant_row.loc[i,'fees_fund_ccy'],relevant_row.loc[i,'fees_fund_ccy_inside_commitment'])
-                        raise NameError('Unexpected Data Found')
-
-                    if fee.SplitInd == -1:
-                        # Zero the return of capital and capital gain amount because it has been split into another fund op
-                        dst_rows_copy.loc[i,'roc_fund_ccy'] = 0
-                        dst_rows_copy.loc[i,'roc_investor_ccy'] = 0 
-                        dst_rows_copy.loc[i,'capital_gains_fund_ccy'] = 0 
-                        dst_rows_copy.loc[i,'capital_gains_investor_ccy'] = 0 
-
-                        # update the fund op
-                        if fee.fee_amount > 0:
-                            dst_rows_copy.loc[i,'fund_op_type'] = 'IF: Call'
-                            dst_rows_copy.loc[i,'fund_op_code'] = 'CC'
-                        elif fee.fee_amount < 0:
-                            dst_rows_copy.loc[i,'fund_op_type'] = 'IF: Return Of Call'
-                            dst_rows_copy.loc[i,'fund_op_code'] = 'CD'
-
-                    dst_rows_copy.loc[i,'mapping'] = fee.Mapping
-                elif fee.SplitInd > 1:
-                    # Update the description to what they've provided
-                    relevant_row['description'] = fee.Description
-                        
-                    if fee.SplitInd == 101:
-                        # If SplitInd = 101 we need to zero the fee on the relevant row in our data because we've split it into it's own separate fund op, away from any investment
-                        dst_rows_copy.loc[i,'fees_fund_ccy'] = 0
-                        dst_rows_copy.loc[i,'fees_fund_ccy_inside_commitment'] = 0
-                        dst_rows_copy.loc[i,'fees_investor_ccy'] = 0
-                        dst_rows_copy.loc[i,'fees_investor_ccy_inside_commitment'] = 0
-
-                    # The fee has been split - this is not the first row, so create a copy of the relevant row and set all non-fee values to 0
-                    relevant_row['investments_fund_ccy'] = 0
-                    relevant_row['investments_investor_ccy'] = 0
-                    relevant_row['roc_fund_ccy'] = 0
-                    relevant_row['roc_investor_ccy'] = 0
-                    relevant_row['capital_gains_fund_ccy'] = 0
-                    relevant_row['capital_gains_investor_ccy'] = 0
-                    
-                    # Update the fund op type as it may no longer be applicable 
-                    if fee.fee_amount > 0:
-                        relevant_row['fund_op_type'] = 'IF: Call'
-                        relevant_row['fund_op_code'] = 'CC'
-                    elif fee.fee_amount < 0:
-                        relevant_row['fund_op_type'] = 'IF: Return Of Call'
-                        relevant_row['fund_op_code'] = 'CD'
-                    
-                    # The fee has been split - this is not the first row, so we need to update the amounts on our copy of the relevant row so we can
-                    if relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] != 0 and relevant_row.loc[i,'fees_fund_ccy'] == 0:
-                        # Find the ratio of the old amount to the new amount
-                        ratio = fee.fee_amount/relevant_row.loc[i,'fees_fund_ccy_inside_commitment']
-                        # Find the corresponding amount in the investor currency and apply the ratio to that
-                        investor_ccy_amount = ratio * relevant_row.loc[i,'fees_investor_ccy_inside_commitment']
-                        # Update the old amount
-                        relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] = round(fee.fee_amount,2)
-                        relevant_row.loc[i,'fees_investor_ccy_inside_commitment'] = round(investor_ccy_amount,2)
-                    elif relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] == 0 and relevant_row.loc[i,'fees_fund_ccy'] != 0:
-                        # Find the ratio of the old amount to the new amount
-                        ratio = fee.fee_amount/relevant_row.loc[i,'fees_fund_ccy']
-                        # Find the corresponding amount in the investor currency and apply the ratio to that
-                        investor_ccy_amount = ratio * relevant_row.loc[i,'fees_investor_ccy']
-                        # Update the old amount
-                        relevant_row.loc[i,'fees_fund_ccy'] = round(fee.fee_amount,2)
-                        relevant_row.loc[i,'fees_investor_ccy'] = round(investor_ccy_amount,2)
-                    else:
-                        # To update later - what we do here will depend on what LR decide based on the fund ops we've sent them
-                        if relevant_row.loc[i,'fees_fund_ccy'] < 0 and relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] > 0:
-                            relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] -= dst_rows_copy.loc[i,'fees_fund_ccy']
-                            relevant_row.loc[i,'fees_investor_ccy_inside_commitment'] -= dst_rows_copy.loc[i,'fees_investor_ccy']
-                            relevant_row.loc[i,'fees_fund_ccy'] = 0
-                            relevant_row.loc[i,'fees_investor_ccy'] = 0
-                        elif relevant_row.loc[i,'fees_fund_ccy'] > 0 and relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] < 0:
-                            relevant_row.loc[i,'fees_fund_ccy'] -= dst_rows_copy.loc[i,'fees_fund_ccy_inside_commitment']
-                            relevant_row.loc[i,'fees_investor_ccy'] -= dst_rows_copy.loc[i,'fees_investor_ccy_inside_commitment']
-                            relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] = 0
-                            relevant_row.loc[i,'fees_investor_ccy_inside_commitment'] = 0
-                        else:
-                            pass
-                    # Add the new row to dst_rows_copy
-                    relevant_row['mapping'] = fee.Mapping
-                    dst_rows_copy = pd.concat([dst_rows_copy, relevant_row], ignore_index=True)            
-                elif fee.SplitInd < -1:
-                    # Update the description to what they've provided
-                    relevant_row['description'] = fee.Description
-                    # The fee has been split - this is not the first row, so create a copy of the relevant row and set all non-fee values to 0
-                    relevant_row['investments_fund_ccy'] = 0
-                    relevant_row['investments_investor_ccy'] = 0
-                    relevant_row['fees_fund_ccy'] = 0
-                    relevant_row['fees_investor_ccy'] = 0
-                    relevant_row['fees_fund_ccy_inside_commitment'] = 0
-                    relevant_row['fees_investor_ccy_inside_commitment'] = 0
-                    
-                    # Update the fund op type as it may no longer be applicable 
-                    relevant_row['fund_op_type'] = 'IF: Distribution'
-                    relevant_row['fund_op_code'] = 'CD'
-                    relevant_row['mapping'] = fee.Mapping
-                    dst_rows_copy = pd.concat([dst_rows_copy, relevant_row], ignore_index=True) 
- 
-    # Create new fee columns 
-    dst_rows_copy['legal_fees_fund_ccy'] = None
-    dst_rows_copy['legal_fees_investor_ccy'] = None
-    dst_rows_copy['org_costs_fund_ccy'] = None
-    dst_rows_copy['org_costs_investor_ccy'] = None
-    dst_rows_copy['partnership_expenses_fund_ccy'] = None
-    dst_rows_copy['partnership_expenses_investor_ccy'] = None
-    dst_rows_copy['other_expenses_fund_ccy'] = None
-    dst_rows_copy['other_expenses_investor_ccy'] = None
-    dst_rows_copy['working_capital_fund_ccy'] = None
-    dst_rows_copy['working_capital_investor_ccy'] = None
-    dst_rows_copy['sub_close_interest_call_fund_ccy'] = None
-    dst_rows_copy['sub_close_interest_call_investor_ccy'] = None
-    dst_rows_copy['legal_fees_fund_ccy_inside_commitment'] = None
-    dst_rows_copy['legal_fees_investor_ccy_inside_commitment'] = None
-    dst_rows_copy['org_costs_fund_ccy_inside_commitment'] = None
-    dst_rows_copy['org_costs_investor_ccy_inside_commitment'] = None
-    dst_rows_copy['partnership_expenses_fund_ccy_inside_commitment'] = None
-    dst_rows_copy['partnership_expenses_investor_ccy_inside_commitment'] = None
-    dst_rows_copy['other_expenses_fund_ccy_inside_commitment'] = None
-    dst_rows_copy['other_expenses_investor_ccy_inside_commitment'] = None
-    dst_rows_copy['working_capital_fund_ccy_inside_commitment'] = None
-    dst_rows_copy['working_capital_investor_ccy_inside_commitment'] = None
-    dst_rows_copy['sub_close_interest_call_fund_ccy_inside_commitment'] = None
-    dst_rows_copy['sub_close_interest_call_investor_ccy_inside_commitment'] = None
-    
-    # Create new distribution columns 
-    dst_rows_copy['dividend_fund_ccy'] = None
-    dst_rows_copy['dividend_investor_ccy'] = None
-    dst_rows_copy['interest_fund_ccy'] = None
-    dst_rows_copy['interest_investor_ccy'] = None
-    dst_rows_copy['other_income_fund_ccy'] = None
-    dst_rows_copy['other_income_investor_ccy'] = None
-    dst_rows_copy['realised_gain_fund_ccy'] = None
-    dst_rows_copy['realised_gain_investor_ccy'] = None
-    dst_rows_copy['withholding_tax_fund_ccy'] = None
-    dst_rows_copy['withholding_tax_investor_ccy'] = None
-    dst_rows_copy['carry_fund_ccy'] = None
-    dst_rows_copy['carry_investor_ccy'] = None
-    dst_rows_copy['sub_close_interest_dist_fund_ccy'] = None
-    dst_rows_copy['sub_close_interest_dist_investor_ccy'] = None
-
-    # Loop through dst_rows_copy and move the amounts based on the mapping
-    for dst_row in dst_rows_copy.itertuples():
-        if dst_row.mapping == dst_row.mapping:
-            # our mapping is populated so use it 
-            if dst_row.fund_op_type == 'IF: Impairment' or dst_row.mapping == 'Impairment':
-                # Don't worry about operation currency here as we'll add it in the add_op_cols function later. We want to add the cap gain amount here (should be -ve)
-                dst_rows_copy.loc[dst_row.Index,'impairment_fund_ccy'] = dst_row.capital_gains_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'impairment_investor_ccy'] = dst_row.capital_gains_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'roc_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'roc_investor_ccy'] = 0
-            elif dst_row.mapping == 'Legal Fees':
-                dst_rows_copy.loc[dst_row.Index,'legal_fees_fund_ccy'] = dst_row.fees_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'legal_fees_investor_ccy'] = dst_row.fees_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
-                # Legal Fees inside commitment
-                dst_rows_copy.loc[dst_row.Index,'legal_fees_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'legal_fees_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
-            elif dst_row.mapping == 'Working Capital':
-                # Working Capital outside commitment
-                dst_rows_copy.loc[dst_row.Index,'working_capital_fund_ccy'] = dst_row.fees_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'working_capital_investor_ccy'] = dst_row.fees_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
-                # Working Capital inside commitment
-                dst_rows_copy.loc[dst_row.Index,'working_capital_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'working_capital_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
-            elif dst_row.mapping == 'Subsequent Close Interest':
-                # Subsequent Close Interest outside commitment
-                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_call_fund_ccy'] = dst_row.fees_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_call_investor_ccy'] = dst_row.fees_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
-                # Subsequent Close Interest inside commitment
-                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_call_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_call_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
-            elif dst_row.mapping == 'Partnership Expenses':
-                # Partnership Expenses outside commitment
-                dst_rows_copy.loc[dst_row.Index,'partnership_expenses_fund_ccy'] = dst_row.fees_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'partnership_expenses_investor_ccy'] = dst_row.fees_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
-                # Partnership Expenses inside commitment
-                dst_rows_copy.loc[dst_row.Index,'partnership_expenses_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'partnership_expenses_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
-            elif dst_row.mapping == 'Organizational Costs':
-                # Organizational Costs outside commitment
-                dst_rows_copy.loc[dst_row.Index,'org_costs_fund_ccy'] = dst_row.fees_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'org_costs_investor_ccy'] = dst_row.fees_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
-                # Organizational Costs inside commitment
-                dst_rows_copy.loc[dst_row.Index,'org_costs_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'org_costs_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
-            elif dst_row.mapping == 'Other Expenses':
-                # Other Expenses outside commitment
-                dst_rows_copy.loc[dst_row.Index,'other_expenses_fund_ccy'] = dst_row.fees_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'other_expenses_investor_ccy'] = dst_row.fees_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
-                # Other Expenses inside commitment
-                dst_rows_copy.loc[dst_row.Index,'other_expenses_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'other_expenses_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
-                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
-                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
-            # Distributions
-            elif dst_row.mapping == 'Interests':
-                # Interests
-                dst_rows_copy.loc[dst_row.Index,'interest_fund_ccy'] = dst_row.capital_gains_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'interest_investor_ccy'] = dst_row.capital_gains_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
-            elif dst_row.mapping == 'Carry':
-                # Realised Gain/Loss
-                dst_rows_copy.loc[dst_row.Index,'carry_fund_ccy'] = dst_row.capital_gains_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'carry_investor_ccy'] = dst_row.capital_gains_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
-            elif dst_row.mapping == 'Dividends':
-                # Dividends
-                dst_rows_copy.loc[dst_row.Index,'dividend_fund_ccy'] = dst_row.capital_gains_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'dividend_investor_ccy'] = dst_row.capital_gains_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
-            elif dst_row.mapping == 'Other Income':
-                # Other Income
-                dst_rows_copy.loc[dst_row.Index,'other_income_fund_ccy'] = dst_row.capital_gains_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'other_income_investor_ccy'] = dst_row.capital_gains_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
-            elif dst_row.mapping == 'Subsequent Close Interest':
-                # Subsequent Close Interest
-                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_dist_fund_ccy'] = dst_row.capital_gains_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_dist_investor_ccy'] = dst_row.capital_gains_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
-            elif dst_row.mapping == 'Withholding Tax':
-                # Withholding Tax
-                dst_rows_copy.loc[dst_row.Index,'withholding_tax_fund_ccy'] = dst_row.capital_gains_fund_ccy
-                dst_rows_copy.loc[dst_row.Index,'withholding_tax_investor_ccy'] = dst_row.capital_gains_investor_ccy
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
-                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
-
-    return dst_rows_copy 
-
 def integrate_misc_categorisation_files(dst_rows):
     # Create a copy of dst_rows - this is the one we will edit 
     dst_rows_copy = dst_rows.copy()
 
     # Read in the data we will use to categorise all our fees/cap gains
-    comp_file_lr = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Data Migration/Investee Fund Operation Compilation Files/Returned by LR/Copy of Fees and Return of Capital Categorisation.xlsx'
+    comp_file_lr = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Data Migration/Investee Fund Operation Compilation Files/Returned by LR/Copy of Fees and Return of Capital Categorisation.xlsx'
     comp_fund_ops = pd.read_excel(comp_file_lr, index_col=None)
 
     # Find the share we're interested in (i.e. the share of our source data) and replace s/p
     share_src = dst_rows['investor'].unique()[0]
 
     # This next bit shouldn't be necessary but I'm afraid to remove it 
-    if share_src in ['AGp Shares - LR','AHp Shares - LR','AHs Shares - LR','AIp Shares - LR','AIs Shares - LR']:
+    if share_src in ['AGp Shares - LR','AHp Shares - LR','AHs Shares - LR','AIp Shares - LR','AIs Shares - LR','AGs Shares - LR','AJp Shares - LR','AJs Shares - LR']:
         share_src = share_src.replace('s S',' S')
         share_src = share_src.replace('p S',' S')
 
     # Only keep the rows we're interested in
-    comp_fund_ops = comp_fund_ops[(comp_fund_ops['Share'] == share_src)&(comp_fund_ops['Share'] != 'M Shares - LR')]
+    comp_fund_ops = comp_fund_ops[(comp_fund_ops['Share'] == share_src)]
 
     # Formate date as datetime
-    dst_rows['date'] = dst_rows['date'].apply(lambda x: dt.datetime(x.year,x.month,x.day))
     comp_fund_ops['Date'] = comp_fund_ops['Date'].apply(lambda x: dt.datetime(x.year,x.month,x.day))
     comp_fund_ops['Investments'] = comp_fund_ops['Investments'].astype('float64')
     comp_fund_ops['Fees'] = comp_fund_ops['Fees'].astype('float64')
@@ -2086,15 +2053,24 @@ def integrate_misc_categorisation_files(dst_rows):
                 relevant_row['roc_investor_ccy'] = 0
                 relevant_row['capital_gains_fund_ccy'] = 0
                 relevant_row['capital_gains_investor_ccy'] = 0
-
-                relevant_row['fund_op_type'] = 'IF: Call'
-                relevant_row['fund_op_code'] = 'CC'
+                if fund_op['Fee outside commitment'] + fund_op['Fee inside commitment'] > 0:
+                    relevant_row['fund_op_type'] = 'IF: Call'
+                    relevant_row['fund_op_code'] = 'CC'
+                else:
+                    relevant_row['fund_op_type'] = 'IF: Return Of Call'
+                    relevant_row['fund_op_code'] = 'CD'
 
                 relevant_row['fees_fund_ccy'] = fund_op['Fee outside commitment']
                 relevant_row['fees_investor_ccy'] = round((relevant_row.loc[ind,'fx_rate']*fund_op['Fee outside commitment']),2)
                 relevant_row['fees_fund_ccy_inside_commitment'] = fund_op['Fee inside commitment']
                 relevant_row['fees_investor_ccy_inside_commitment'] = round((relevant_row.loc[ind,'fx_rate']*fund_op['Fee inside commitment']),2)
-                
+
+                if fund_op['AddedInd'] > 100:
+                    # The original fee has been split out into it's own fund operation, so we need to null any fees on the original row
+                    dst_rows_copy.loc[ind,'fees_fund_ccy_inside_commitment'] = 0
+                    dst_rows_copy.loc[ind,'fees_investor_ccy_inside_commitment'] = 0
+                    dst_rows_copy.loc[ind,'fees_fund_ccy'] = 0
+                    dst_rows_copy.loc[ind,'fees_investor_ccy'] = 0
                 dst_rows_copy = pd.concat([dst_rows_copy, relevant_row], ignore_index=True)
             # Redraw
             redraw_fund_ccy = fund_op['return of capital redrawable amount'] + fund_op['capital gain redrawable amount']
@@ -2103,6 +2079,537 @@ def integrate_misc_categorisation_files(dst_rows):
                 dst_rows_copy.loc[ind,'redraw_investor_ccy'] = round((relevant_row.loc[ind,'fx_rate']*redraw_fund_ccy),2)
 
     return dst_rows_copy
+
+def integrate_LR_compilation_file(dst_rows,comp_file_lr,month_end_dates):
+    """ 
+        Inputs:
+            dst_rows: the processed data containing the fees we want to categorise
+            month_end_dates: the month end dates
+        Get the categorised fees/capital gains data, add rows where one amount has been split in two and classify the fees/capital gains in our data  
+    """
+    # Read in Compilation data
+    comp_fees = pd.read_excel(comp_file_lr, index_col=None, sheet_name='Fees')
+    # All rows with non-zero capital gains from return of capital/fees sheet should have been copied to the Capital Gains sheet, so we don't need to read in the return of capital sheet
+    comp_cap_gains = pd.read_excel(comp_file_lr, index_col=None, sheet_name='Capital Gains')
+
+    # Make a copy of dst_rows, because we'll need a place to store our updated amounts
+    dst_rows_copy = dst_rows.copy()
+    dst_rows.loc[:,['fees_fund_ccy','fees_fund_ccy_inside_commitment']] = dst_rows.loc[:,['fees_fund_ccy','fees_fund_ccy_inside_commitment']].fillna(0)
+
+    # Find the share we're interested in (i.e. the share of our source data) and replace s/p
+    share_src = dst_rows['investor'].unique()[0]
+    share_src = share_src.replace(' - LR','')
+    if share_src in ['AGp Shares','AHp Shares','AHs Shares','AIp Shares','AIs Shares','AGs Shares','AJp Shares','AJs Shares']:
+        share_src = share_src.replace('s ',' ')
+        share_src = share_src.replace('p ',' ')
+
+    # Only keep the rows we're interested in
+    comp_fees_share = comp_fees[comp_fees['Share'] == share_src]
+    comp_fees_share = comp_fees_share[(comp_fees_share.Mapping != '?')&(comp_fees_share.Mapping == comp_fees_share.Mapping)]
+    comp_cap_gains_share = comp_cap_gains[comp_cap_gains['Share'] == share_src]
+    comp_cap_gains_share = comp_cap_gains_share[(comp_cap_gains_share.Mapping != '?')&(comp_cap_gains_share.Mapping == comp_cap_gains_share.Mapping)]
+
+    # Convert our date column to datetime in case it isn't already
+    comp_fees_share['Date'] = comp_fees_share['Date'].apply(lambda x: dt.datetime(x.year,x.month,x.day))
+    comp_cap_gains_share['Date'] = comp_cap_gains_share['Date'].apply(lambda x: dt.datetime(x.year,x.month,x.day))
+
+    if 'old_description' not in comp_cap_gains_share.columns:
+        comp_cap_gains_share['old_description'] = comp_cap_gains_share['Description']
+
+    # Transfer all our capital gains mappings to dst_rows_copy
+    for row in comp_cap_gains_share.itertuples():
+        # Add "- LR" next to the fund name if in N and O shares 
+        fund = row.investee_fund
+        alt_fund = fund + ' - LR'
+
+        comp_date = row.Date
+        tomorrow = comp_date + pd.DateOffset(days=1)
+
+        # Find the relevant row
+        if fund in dst_rows['fund_name'].to_list():
+            # Some shares are split into multiple files, and this row might correspond to a fund in the other file
+            relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == row.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(dst_rows['description'] == row.old_description)&(round(dst_rows['capital_gains_fund_ccy'],2) == round(row.cg_amount,2))].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # If N/O shares we might need to add - LR at the end of the fund
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == row.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(dst_rows['description'] == row.old_description)&(round(dst_rows['capital_gains_fund_ccy'],2) == round(row.cg_amount,2))].copy()
+            if len(relevant_row) != 1:
+                # maybe the capital gains amount has changed 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == row.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(dst_rows['description'] == row.old_description)].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == row.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(dst_rows['description'] == row.old_description)].copy()
+            if len(relevant_row) != 1:
+                # maybe the description has changed 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == row.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['capital_gains_fund_ccy'],2) == round(row.cg_amount,2))].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == row.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['capital_gains_fund_ccy'],2) == round(row.cg_amount,2))].copy()
+            if len(relevant_row) != 1:
+                # maybe the description and amount has changed 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == row.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == row.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))].copy()
+            if len(relevant_row) != 1:
+                print(f"\t\tWarning: row not found for distributed amount - {row.Share} - {fund} - {row.Date} - {row.Description} - {row.roc_amount} - {row.cg_amount} - {tomorrow in month_end_dates}")
+                logging.warning(f"\t\tWarning: row not found for distributed amount - {row.Share} - {fund} - {row.Date} - {row.Description} - {row.roc_amount} - {row.cg_amount} - {tomorrow in month_end_dates}")
+            else:
+                if row.SplitInd == 0 and dst_rows_copy.loc[relevant_row.index,'dist_mapped_ind'].values[0] == True:
+                    print(f'\t\tCompilation file distribution overwrite attempt: {row}')
+                else:
+                    if row.Mapping == 'Subsequent Close Interest': 
+                        mapping = 'SCI - Dist'
+                    else:
+                        mapping = row.Mapping
+
+                    if row.SplitInd == 1:
+                        # First row - update description and amount if applicable
+                        dst_rows_copy.loc[relevant_row.index,'capital_gains_fund_ccy'] = row.cg_amount
+                        dst_rows_copy.loc[relevant_row.index,'capital_gains_investor_ccy'] = round((row.cg_amount * dst_rows_copy.loc[relevant_row.index,'fx_rate']),2)
+                        dst_rows_copy.loc[relevant_row.index,'description'] = row.Description
+                        dst_rows_copy.loc[relevant_row.index,'mapping'] = mapping
+                        dst_rows_copy.loc[relevant_row.index,'dist_mapped_ind'] = True
+                        if int(comp_file_lr.split('Clean_')[1].split('.xlsx')[0]) >= 4:
+                            dst_rows_copy.loc[relevant_row.index,'newly_classified_ind'] = True    
+                    elif row.SplitInd > 1:
+                        # New fund op added 
+                        relevant_row['description'] = row.Description
+                        # The distribution has been split - this is not the first row, so create a copy of the relevant row and set all non-distribution values to 0
+                        relevant_row['investments_fund_ccy'] = 0
+                        relevant_row['investments_investor_ccy'] = 0
+                        relevant_row['fees_fund_ccy'] = 0
+                        relevant_row['fees_investor_ccy'] = 0
+                        relevant_row['fees_fund_ccy_inside_commitment'] = 0
+                        relevant_row['fees_investor_ccy_inside_commitment'] = 0
+                        relevant_row['roc_fund_ccy'] = 0
+                        relevant_row['roc_investor_ccy'] = 0
+                        relevant_row['capital_gains_fund_ccy'] = row.cg_amount
+                        relevant_row['capital_gains_investor_ccy'] = round((row.cg_amount * dst_rows_copy.loc[row.Index,'fx_rate']),2)
+                        
+                        # Update the fund op type as it may no longer be applicable 
+                        relevant_row['fund_op_type'] = 'IF: Distribution'
+                        relevant_row['fund_op_code'] = 'CD'
+                        relevant_row['mapping'] = mapping
+                        relevant_row['dist_mapped_ind'] = True
+                        if int(comp_file_lr.split('Clean_')[1].split('.xlsx')[0]) >= 4:
+                            relevant_row['newly_classified_ind'] = True
+                        dst_rows_copy = pd.concat([dst_rows_copy, relevant_row], ignore_index=True)
+                    else:
+                        dst_rows_copy.loc[relevant_row.index,'description'] = row.Description
+                        dst_rows_copy.loc[relevant_row.index,'mapping'] = mapping
+                        dst_rows_copy.loc[relevant_row.index,'dist_mapped_ind'] = True
+                        try:
+                            if int(comp_file_lr.split('Clean_')[1].split('.xlsx')[0]) >= 4:
+                                dst_rows_copy.loc[relevant_row.index,'newly_classified_ind'] = True
+                        except IndexError:
+                            print(comp_file_lr)
+                
+    # Before we try to match the fees we need to strip the descriptions of any leading/trailing spaces and replace spaces with _
+    # https://stackoverflow.com/questions/69513863/identical-strings-dont-match-in-python-an-issue-with-spaces-leading-trailing 
+    try:         
+        dst_rows['old_description'] = dst_rows['description'].str.strip().apply(lambda x: '_'.join(x.split()))
+        comp_fees_share['old_description'] = comp_fees_share['old_description'].str.strip().apply(lambda x: '_'.join(x.split()))
+    except AttributeError:
+        dst_rows['old_description'] = dst_rows['description']
+        comp_fees_share['old_description'] = comp_fees_share['old_description']
+
+
+    # Transfer all our fee mappings to dst_rows_copy and split amounts/rows as appropriate 
+    for fee in comp_fees_share.itertuples():
+        fund = fee.investee_fund
+        alt_fund = fund + ' - LR'
+
+        comp_date = fee.Date
+        tomorrow = comp_date + pd.DateOffset(days=1)
+
+        if fund in dst_rows['fund_name'].to_list():
+            # Find the relevant row in our data
+            relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy'],2) == round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy'],2) == round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
+            if len(relevant_row) != 1:
+                # maybe the fee amount is inside commitment
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) == round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) == round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
+            if len(relevant_row) != 1:
+                # maybe the fee amount has changed
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy'],2) != round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy'],2) != round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
+            if len(relevant_row) != 1:
+                # maybe the fee amount is inside commitment and has changed 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) != round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) != round(fee.fee_amount,2))&(dst_rows['old_description'] == fee.old_description)].copy()
+            if len(relevant_row) != 1:
+                # maybe the description has changed
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy'],2) == round(fee.fee_amount,2))].copy() 
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy'],2) == round(fee.fee_amount,2))].copy()
+            if len(relevant_row) != 1:
+                # maybe the fee amount is inside commitment and the description has changed
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) == round(fee.fee_amount,2))].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) == round(fee.fee_amount,2))].copy()
+            if len(relevant_row) != 1:
+                # maybe the fee amount has changed and the description has changed
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy'],2) != round(fee.fee_amount,2))].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy'],2) != round(fee.fee_amount,2))].copy()
+            if len(relevant_row) != 1:
+                # maybe the fee amount is inside commitment and has changed and the description has changed 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) != round(fee.fee_amount,2))].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares']:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(round(dst_rows['fees_fund_ccy_inside_commitment'],2) != round(fee.fee_amount,2))].copy()
+            if len(relevant_row) != 1 and fee.SplitInd != 0:
+                # the amount is not going to match because this row has been split 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(dst_rows['old_description'].values[0] == fee.old_description)].copy()
+            if len(relevant_row) != 1 and share_src in ['N Shares','O Shares'] and fee.SplitInd != 0:
+                # As above but look for a fund with - LR at the end 
+                relevant_row = dst_rows[(dst_rows['fund_name'] == alt_fund)&((dst_rows['date'] == fee.Date)|((tomorrow in month_end_dates)&(dst_rows['date'] == tomorrow)&(dst_rows['shifted_to_month_end_ind'] == True)))&(dst_rows['old_description'].values[0] == fee.old_description)].copy()
+            if len(relevant_row) != 1:
+                print(f"\t\tWarning: row not found for fee: {fee.Share} - {fund} - {fee.Date} - {fee.old_description} - {fee.fee_amount}")
+                logging.warning(f"\t\tWarning: row not found for fee: {fee.Share} - {fund} - {fee.Date} - {fee.old_description} - {fee.fee_amount}")
+            else:
+                # Get the index of the row in our source data
+                i = relevant_row.index.to_list()[0]
+
+                # Update the amounts 
+                if fee.SplitInd in [1,0,-1]:
+                    if dst_rows_copy.loc[i,'fee_mapped_ind'] == True and fee.SplitInd == 0:
+                        print(f'\t\tCompilation file fee overwrite attempt: {fee}')
+                    else:
+                        # The fee might have been split, in which case this is the first row
+                        # Update the description in case it has been changed
+                        dst_rows_copy.loc[i,'description'] = fee.Description
+                        # Update the mapping
+                        dst_rows_copy.loc[i,'mapping'] = fee.Mapping
+                        dst_rows_copy.loc[i,'fee_mapped_ind'] = True
+                        # Compilation Files 4 and above were after go-live so mark any updates made since then
+                        if int(comp_file_lr.split('Clean_')[1].split('.xlsx')[0]) >= 4:
+                            dst_rows_copy.loc[i,'newly_classified_ind'] = True
+                        # Update the amount
+                        if relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] != 0 and relevant_row.loc[i,'fees_fund_ccy'] == 0:
+                            # Find the ratio of the old amount to the new amount
+                            ratio = fee.fee_amount/relevant_row.loc[i,'fees_fund_ccy_inside_commitment']
+                            # Find the corresponding amount in the investor currency and apply the ratio to that
+                            investor_ccy_amount = ratio * relevant_row.loc[i,'fees_investor_ccy_inside_commitment']
+                            # Update the old amount
+                            dst_rows_copy.loc[i,'fees_fund_ccy_inside_commitment'] = round(fee.fee_amount,2)
+                            dst_rows_copy.loc[i,'fees_investor_ccy_inside_commitment'] = round(investor_ccy_amount,2)
+                        elif relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] == 0 and relevant_row.loc[i,'fees_fund_ccy'] != 0:
+                            # Find the ratio of the old amount to the new amount
+                            ratio = fee.fee_amount/relevant_row.loc[i,'fees_fund_ccy']
+                            # Find the corresponding amount in the investor currency and apply the ratio to that
+                            investor_ccy_amount = ratio * relevant_row.loc[i,'fees_investor_ccy']
+                            # Update the old amount
+                            dst_rows_copy.loc[i,'fees_fund_ccy'] = round(fee.fee_amount,2)
+                            dst_rows_copy.loc[i,'fees_investor_ccy'] = round(investor_ccy_amount,2)
+                        elif round(fee.fee_amount,2) == round((relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] + relevant_row.loc[i,'fees_fund_ccy']),2):
+                            # They just want to separate the fee inside commitment and fee outside commitment. We have already done that so ignore this row 
+                            pass 
+                        elif relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] == 0 and relevant_row.loc[i,'fees_fund_ccy'] == 0:
+                            # No fee. This is not necessarily an issue. This should only happen if we split the fee in the integrate_misc_categorisation_files function
+                            print(f"\t\tFee amounts 0: {relevant_row.loc[i,'fund_name'], relevant_row.loc[i,'date'], relevant_row.loc[i,'description'], relevant_row.loc[i,'fees_fund_ccy'],relevant_row.loc[i,'fees_fund_ccy_inside_commitment'], fee.fee_amount}")
+                            logging.info(f"\t\tFee amounts 0: {relevant_row.loc[i,'fund_name'], relevant_row.loc[i,'date'], relevant_row.loc[i,'description'], relevant_row.loc[i,'fees_fund_ccy'],relevant_row.loc[i,'fees_fund_ccy_inside_commitment'], fee.fee_amount}")
+                        else:
+                            # Any rows in our compilation file corresponding to mixed fees should have SplitInd >100, so throw an error if we end up here
+
+                            print('\t\tAttempting to categorise fee partially in and partially outside commitment: ',relevant_row.loc[i,'date'], relevant_row.loc[i,'description'], relevant_row.loc[i,'fees_fund_ccy'],relevant_row.loc[i,'fees_fund_ccy_inside_commitment'])
+                            #raise NameError('Unexpected Data Found')
+                    
+                    if fee.SplitInd == -1:
+                        # Zero the return of capital and capital gain amount because it has been split into another fund op
+                        dst_rows_copy.loc[i,'roc_fund_ccy'] = 0
+                        dst_rows_copy.loc[i,'roc_investor_ccy'] = 0 
+                        dst_rows_copy.loc[i,'capital_gains_fund_ccy'] = 0 
+                        dst_rows_copy.loc[i,'capital_gains_investor_ccy'] = 0 
+
+                        # # update the fund op
+                        # if fee.fee_amount > 0:
+                        #     dst_rows_copy.loc[i,'fund_op_type'] = 'IF: Call'
+                        #     dst_rows_copy.loc[i,'fund_op_code'] = 'CC'
+                        # elif fee.fee_amount < 0:
+                        #     dst_rows_copy.loc[i,'fund_op_type'] = 'IF: Return Of Call'
+                        #     dst_rows_copy.loc[i,'fund_op_code'] = 'CD'
+
+                    # update the fund op
+                    if relevant_row.loc[i,'fund_op_type'] != 'IF: Mixed operation':
+                        if round(fee.fee_amount,2) + round(relevant_row.loc[i,'investments_fund_ccy'],2) > 0 or fee.Mapping == 'Subsequent Close Interest':
+                            dst_rows_copy.loc[i,'fund_op_type'] = 'IF: Call'
+                            dst_rows_copy.loc[i,'fund_op_code'] = 'CC'
+                        elif fee.fee_amount < 0:
+                            dst_rows_copy.loc[i,'fund_op_type'] = 'IF: Return Of Call'
+                            dst_rows_copy.loc[i,'fund_op_code'] = 'CD'
+                    
+                elif fee.SplitInd > 1 and fee.SplitInd <= 100:
+                    # Update the description to what they've provided
+                    relevant_row['description'] = fee.Description
+
+                    # Add the mapping
+                    relevant_row['mapping'] = fee.Mapping
+                    relevant_row['fee_mapped_ind'] = True
+                    if int(comp_file_lr.split('Clean_')[1].split('.xlsx')[0]) >= 4:
+                        dst_rows_copy.loc[i,'newly_classified_ind'] = True
+
+                    # The fee has been split - this is not the first row, so create a copy of the relevant row and set all non-fee values to 0
+                    relevant_row['investments_fund_ccy'] = 0
+                    relevant_row['investments_investor_ccy'] = 0
+                    relevant_row['roc_fund_ccy'] = 0
+                    relevant_row['roc_investor_ccy'] = 0
+                    relevant_row['capital_gains_fund_ccy'] = 0
+                    relevant_row['capital_gains_investor_ccy'] = 0
+                    
+                    # Update the fund op type as it may no longer be applicable 
+                    if fee.fee_amount > 0 or fee.Mapping == 'Subsequent Close Interest':
+                        relevant_row['fund_op_type'] = 'IF: Call'
+                        relevant_row['fund_op_code'] = 'CC'
+                    elif fee.fee_amount < 0 and fee.Mapping != 'Subsequent Close Interest':
+                        relevant_row['fund_op_type'] = 'IF: Return Of Call'
+                        relevant_row['fund_op_code'] = 'CD'
+                    
+                    # The fee has been split - this is not the first row, so we need to update the amounts on our copy of the relevant row so we can
+                    if relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] != 0 and relevant_row.loc[i,'fees_fund_ccy'] == 0:
+                        # Find the ratio of the old amount to the new amount
+                        ratio = fee.fee_amount/relevant_row.loc[i,'fees_fund_ccy_inside_commitment']
+                        # Find the corresponding amount in the investor currency and apply the ratio to that
+                        investor_ccy_amount = ratio * relevant_row.loc[i,'fees_investor_ccy_inside_commitment']
+                        # Update the old amount
+                        relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] = round(fee.fee_amount,2)
+                        relevant_row.loc[i,'fees_investor_ccy_inside_commitment'] = round(investor_ccy_amount,2)
+                    elif relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] == 0 and relevant_row.loc[i,'fees_fund_ccy'] != 0:
+                        # Find the ratio of the old amount to the new amount
+                        ratio = fee.fee_amount/relevant_row.loc[i,'fees_fund_ccy']
+                        # Find the corresponding amount in the investor currency and apply the ratio to that
+                        investor_ccy_amount = ratio * relevant_row.loc[i,'fees_investor_ccy']
+                        # Update the old amount
+                        relevant_row.loc[i,'fees_fund_ccy'] = round(fee.fee_amount,2)
+                        relevant_row.loc[i,'fees_investor_ccy'] = round(investor_ccy_amount,2)
+                    else:
+                        # We dont expect any rows in our compilation file corresponding to mixed fees, so throw an error if we end up here
+                        print(f"\t\tWarning: row not found for fee: {fee.Share} - {fund} - {fee.Date} - {fee.old_description} - {fee.fee_amount}")
+                        print(f"\t\tWarning: {relevant_row.loc[i,'date'], relevant_row.loc[i,'description'], relevant_row.loc[i,'fees_fund_ccy'],relevant_row.loc[i,'fees_fund_ccy_inside_commitment']}")
+                        logging.warning(f"\t\tWarning: row not found for fee: {fee.Share} - {fund} - {fee.Date} - {fee.old_description} - {fee.fee_amount}")
+                        logging.warning(f"\t\tWarning: {relevant_row.loc[i,'date'], relevant_row.loc[i,'description'], relevant_row.loc[i,'fees_fund_ccy'],relevant_row.loc[i,'fees_fund_ccy_inside_commitment']}")
+                    
+                    # Add the new row to dst_rows_copy
+                    dst_rows_copy = pd.concat([dst_rows_copy, relevant_row], ignore_index=True)
+                elif fee.SplitInd < -1:
+                    # Update the description to what they've provided
+                    relevant_row['description'] = fee.Description
+                    # The fee has been split - this is not the first row, so create a copy of the relevant row and set all non-fee values to 0
+                    relevant_row['investments_fund_ccy'] = 0
+                    relevant_row['investments_investor_ccy'] = 0
+                    relevant_row['fees_fund_ccy'] = 0
+                    relevant_row['fees_investor_ccy'] = 0
+                    relevant_row['fees_fund_ccy_inside_commitment'] = 0
+                    relevant_row['fees_investor_ccy_inside_commitment'] = 0
+                    
+                    # Update the fund op type as it may no longer be applicable 
+                    relevant_row['fund_op_type'] = 'IF: Distribution'
+                    relevant_row['fund_op_code'] = 'CD'
+                    relevant_row['mapping'] = fee.Mapping
+                    relevant_row['fee_mapped_ind'] = True
+                    if int(comp_file_lr.split('Clean_')[1].split('.xlsx')[0]) >= 4:
+                        relevant_row['newly_classified_ind'] = True
+                    dst_rows_copy = pd.concat([dst_rows_copy, relevant_row], ignore_index=True) 
+                elif fee.SplitInd > 100:
+                    # This is a mixed fee that has been split - part of it is inside commitment and part of it is outside commitment.   
+                    # Update the description to what they've provided
+                    relevant_row['description'] = fee.Description
+
+                    # Update the mapping
+                    relevant_row['mapping'] = fee.Mapping   
+                    relevant_row['fee_mapped_ind'] = True               
+                    if int(comp_file_lr.split('Clean_')[1].split('.xlsx')[0]) >= 4:
+                        relevant_row['newly_classified_ind'] = True
+                    # We need to zero the fee on the relevant row in our data because we've split it into it's own separate fund op, away from any investment
+                    dst_rows_copy.loc[i,'fees_fund_ccy'] = 0
+                    dst_rows_copy.loc[i,'fees_fund_ccy_inside_commitment'] = 0
+                    dst_rows_copy.loc[i,'fees_investor_ccy'] = 0
+                    dst_rows_copy.loc[i,'fees_investor_ccy_inside_commitment'] = 0
+
+                    # The fee has been split - this is not the first row, so create a copy of the relevant row and set all non-fee values to 0
+                    relevant_row['investments_fund_ccy'] = 0
+                    relevant_row['investments_investor_ccy'] = 0
+                    relevant_row['roc_fund_ccy'] = 0
+                    relevant_row['roc_investor_ccy'] = 0
+                    relevant_row['capital_gains_fund_ccy'] = 0
+                    relevant_row['capital_gains_investor_ccy'] = 0
+                    
+                    # Update the fund op type as it may no longer be applicable 
+                    if fee.fee_amount > 0 or fee.Mapping == 'Subsequent Close Interest':
+                        relevant_row['fund_op_type'] = 'IF: Call'
+                        relevant_row['fund_op_code'] = 'CC'
+                    elif fee.fee_amount < 0 and fee.Mapping != 'Subsequent Close Interest':
+                        relevant_row['fund_op_type'] = 'IF: Return Of Call'
+                        relevant_row['fund_op_code'] = 'CD'
+                    
+                    # Set the fee amount based on the LR Compilation file 
+                    if round(relevant_row.loc[i,'fees_fund_ccy_inside_commitment'],2) == round(fee.fee_amount,2):
+                        # The actual amounts should not change, so we don't need to calculate anything. Just set the other amount to 0 because it'll get added by SplitInd = 102
+                        relevant_row.loc[i,'fees_fund_ccy'] = 0
+                        relevant_row.loc[i,'fees_investor_ccy'] = 0
+                    elif round(relevant_row.loc[i,'fees_fund_ccy'],2) == round(fee.fee_amount,2):
+                        # The actual amounts should not change, so we don't need to calculate anything. Just set the other amount to 0 because it'll get added by SplitInd = 102 
+                        relevant_row.loc[i,'fees_fund_ccy_inside_commitment'] = 0
+                        relevant_row.loc[i,'fees_investor_ccy_inside_commitment'] = 0
+                    else:
+                        # We dont expect any rows in our compilation file corresponding to mixed fees, so throw an error if we end up here
+                        print(f"\t\tWarning 101: row not found for fee: {fee.Share} - {fund} - {fee.Date} - {fee.old_description} - {fee.fee_amount}")
+                        print(f"\t\tWarning 101: {relevant_row.loc[i,'date'], relevant_row.loc[i,'description'], relevant_row.loc[i,'fees_fund_ccy'],relevant_row.loc[i,'fees_fund_ccy_inside_commitment']}")
+                        logging.warning(f"\t\tWarning 101: row not found for fee: {fee.Share} - {fund} - {fee.Date} - {fee.old_description} - {fee.fee_amount}")
+                        logging.warning(f"\t\tWarning 101: {relevant_row.loc[i,'date'], relevant_row.loc[i,'description'], relevant_row.loc[i,'fees_fund_ccy'],relevant_row.loc[i,'fees_fund_ccy_inside_commitment']}")
+
+                    # Add the new row to dst_rows_copy
+                    dst_rows_copy = pd.concat([dst_rows_copy, relevant_row], ignore_index=True)
+
+    
+    # Loop through dst_rows_copy and move the amounts based on the mapping
+    # Move the fees
+    for dst_row in dst_rows_copy.itertuples():
+        if dst_row.mapping == dst_row.mapping and dst_row.mapping is not None and dst_row.fee_moved_ind == False:
+            # our mapping is populated so use it 
+            if dst_row.mapping == 'Legal Fees':
+                dst_rows_copy.loc[dst_row.Index,'legal_fees_fund_ccy'] = dst_row.fees_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'legal_fees_investor_ccy'] = dst_row.fees_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
+                # Legal Fees inside commitment
+                dst_rows_copy.loc[dst_row.Index,'legal_fees_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'legal_fees_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fee_moved_ind'] = True
+            elif dst_row.mapping == 'Working Capital':
+                # Working Capital outside commitment
+                dst_rows_copy.loc[dst_row.Index,'working_capital_fund_ccy'] = dst_row.fees_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'working_capital_investor_ccy'] = dst_row.fees_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
+                # Working Capital inside commitment
+                dst_rows_copy.loc[dst_row.Index,'working_capital_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'working_capital_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fee_moved_ind'] = True
+            elif dst_row.mapping == 'Subsequent Close Interest':
+                # Subsequent Close Interest outside commitment
+                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_call_fund_ccy'] = dst_row.fees_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_call_investor_ccy'] = dst_row.fees_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
+                # Subsequent Close Interest inside commitment
+                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_call_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_call_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fee_moved_ind'] = True
+            elif dst_row.mapping == 'Partnership Expenses':
+                # Partnership Expenses outside commitment
+                dst_rows_copy.loc[dst_row.Index,'partnership_expenses_fund_ccy'] = dst_row.fees_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'partnership_expenses_investor_ccy'] = dst_row.fees_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
+                # Partnership Expenses inside commitment
+                dst_rows_copy.loc[dst_row.Index,'partnership_expenses_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'partnership_expenses_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fee_moved_ind'] = True
+            elif dst_row.mapping == 'Organizational Costs':
+                # Organizational Costs outside commitment
+                dst_rows_copy.loc[dst_row.Index,'org_costs_fund_ccy'] = dst_row.fees_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'org_costs_investor_ccy'] = dst_row.fees_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
+                # Organizational Costs inside commitment
+                dst_rows_copy.loc[dst_row.Index,'org_costs_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'org_costs_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fee_moved_ind'] = True
+            elif dst_row.mapping == 'Other Expenses':
+                # Other Expenses outside commitment
+                dst_rows_copy.loc[dst_row.Index,'other_expenses_fund_ccy'] = dst_row.fees_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'other_expenses_investor_ccy'] = dst_row.fees_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy'] = 0
+                # Other Expenses inside commitment
+                dst_rows_copy.loc[dst_row.Index,'other_expenses_fund_ccy_inside_commitment'] = dst_row.fees_fund_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'other_expenses_investor_ccy_inside_commitment'] = dst_row.fees_investor_ccy_inside_commitment
+                dst_rows_copy.loc[dst_row.Index,'fees_fund_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fees_investor_ccy_inside_commitment'] = 0
+                dst_rows_copy.loc[dst_row.Index,'fee_moved_ind'] = True
+
+    # Move the distributions
+    for dst_row in dst_rows_copy.itertuples():
+        if dst_row.mapping == dst_row.mapping and dst_row.mapping is not None and dst_row.dist_moved_ind == False:
+            if dst_row.fund_op_type == 'IF: Impairment' or dst_row.mapping == 'Impairment' and dst_rows_copy.loc[dst_row.Index,'impairment_fund_ccy'] :
+                # Don't worry about operation currency here as we'll add it in the add_op_cols function later. We want to add the cap gain amount here (should be -ve)
+                dst_rows_copy.loc[dst_row.Index,'impairment_fund_ccy'] = dst_row.capital_gains_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'impairment_investor_ccy'] = dst_row.capital_gains_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'roc_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'roc_investor_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'dist_moved_ind'] = True
+            elif dst_row.mapping == 'Interests':
+                dst_rows_copy.loc[dst_row.Index,'interest_fund_ccy'] = dst_row.capital_gains_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'interest_investor_ccy'] = dst_row.capital_gains_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'dist_moved_ind'] = True
+            elif dst_row.mapping == 'Carry':
+                # For Carry the amount must be negative 
+                if dst_row.capital_gains_fund_ccy > 0:
+                    dst_rows_copy.loc[dst_row.Index,'fund_op_type'] = 'IF: Mixed operation'
+                    dst_rows_copy.loc[dst_row.Index,'fund_op_code'] = 'CCCD'
+
+                dst_rows_copy.loc[dst_row.Index,'carry_fund_ccy'] = dst_row.capital_gains_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'carry_investor_ccy'] = dst_row.capital_gains_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'dist_moved_ind'] = True
+            elif dst_row.mapping == 'Dividends':
+                # Dividends
+                dst_rows_copy.loc[dst_row.Index,'dividend_fund_ccy'] = dst_row.capital_gains_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'dividend_investor_ccy'] = dst_row.capital_gains_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'dist_moved_ind'] = True
+            elif dst_row.mapping == 'Other Income':
+                # Other Income
+                dst_rows_copy.loc[dst_row.Index,'other_income_fund_ccy'] = dst_row.capital_gains_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'other_income_investor_ccy'] = dst_row.capital_gains_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'dist_moved_ind'] = True
+            elif dst_row.mapping == 'SCI - Dist':
+                # Subsequent Close Interest
+                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_dist_fund_ccy'] = dst_row.capital_gains_fund_ccy
+                dst_rows_copy.loc[dst_row.Index,'sub_close_interest_dist_investor_ccy'] = dst_row.capital_gains_investor_ccy
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'dist_moved_ind'] = True
+            elif dst_row.mapping == 'Withholding Tax':
+                # Withholding Tax
+                dst_rows_copy.loc[dst_row.Index,'withholding_tax_fund_ccy'] = -dst_row.capital_gains_fund_ccy # The amount will appear with the opposite sign in eFront to what's in the source file, but the IRR trace will be correct. 
+                dst_rows_copy.loc[dst_row.Index,'withholding_tax_investor_ccy'] = -dst_row.capital_gains_investor_ccy # The amount will appear with the opposite sign in eFront to what's in the source file, but the IRR trace will be correct. 
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_fund_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'capital_gains_investor_ccy'] = 0
+                dst_rows_copy.loc[dst_row.Index,'dist_moved_ind'] = True
+
+    return dst_rows_copy 
 
 ######################################################################################
 #                                  Managed Fund Ops                                  #
@@ -2117,9 +2624,9 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
 
     # ---------------------1---------------------
     # Define the template and import key data
-    template_file = 'C:/Users/AnonAnon/OneDrive - IT-Venture Ltd/Documents/Temp/N2. Managed Fund Operations - Test Template.xlsx'
+    template_file = 'C:/Users/RajContractor/OneDrive - IT-Venture Ltd/Documents/Temp/N2. Managed Fund Operations - Test Template.xlsx'
 
-    investor_details_file = 'C:/Users/AnonAnon/Documents/Lion River/LR Reports/Managed Funds/Investor_Details.xlsx'
+    investor_details_file = 'C:/Users/RajContractor/Documents/Lion River/LR Reports/Managed Funds/Investor_Details.xlsx'
     investor_details = pd.read_excel(investor_details_file)
     
     # ---------------------2--------------------- 
@@ -2139,12 +2646,15 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
     # Get the official list of investors. Make sure every investor in our Com_Nom file matches the investors import (it should do already)
     if env == 'UAT':
         # Use the UAT import files
-        descriptions_map_file = 'C:/Users/AnonAnon/Documents/Lion River/LR Reports/Managed Funds/DescriptionsMap_UAT.xlsx'
-        investors_import_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/06.1 Investors.xlsx'
+        descriptions_map_file = 'C:/Users/RajContractor/Documents/Lion River/LR Reports/Managed Funds/DescriptionsMap_UAT.xlsx'
+        investors_import_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/06.1 Investors.xlsx'
+    elif env == 'PROD':
+        descriptions_map_file = 'C:/Users/RajContractor/Documents/Lion River/LR Reports/Managed Funds/DescriptionsMap_UAT.xlsx'
+        investors_import_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/06.1 Investors.xlsx'
     else:
         # Use the DEV import files
-        descriptions_map_file = 'C:/Users/AnonAnon/Documents/Lion River/LR Reports/Managed Funds/DescriptionsMap_DEV.xlsx'
-        investors_import_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/06.1 DEV Investors.xlsx'
+        descriptions_map_file = 'C:/Users/RajContractor/Documents/Lion River/LR Reports/Managed Funds/DescriptionsMap_DEV.xlsx'
+        investors_import_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/06.1 DEV Investors.xlsx'
     investors_import = pd.read_excel(investors_import_file, index_col=None, header=2, usecols='C:H',sheet_name='Investors Import')[1:]
     descriptions_map = pd.read_excel(descriptions_map_file,index_col=0) 
     # Replace any old names with the new ones
@@ -2165,6 +2675,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
     new_descriptions_shares = {}
     # Define a new dictionary so that we make a log of all the descriptions that we don't attribute to any given investor 
     split_descriptions_shares = {}
+    x_investor = None 
 
     for share in list(investor_details['share'].unique()):
         # Read in the sheet for the current share from the masterfile, store the info in a dataframe and format it
@@ -2294,6 +2805,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                                             ,input_row    
                                             ,input_row       
                                             ,dst_rows_unsplit
+                                            ,month_end_dates=[]
                                             ,fx_rates = None
                                             ,investee_fund=False)
 
@@ -2339,12 +2851,12 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
         split_descriptions_map_df = pd.DataFrame({'shares': split_descriptions_shares.values()}, index=split_descriptions_shares.keys())
         if env == 'UAT':
             # Use the UAT import files
-            with pd.ExcelWriter('C:/Users/AnonAnon/Documents/Lion River/LR Reports/Managed Funds/DescriptionsMap_UAT.xlsx') as writer:
+            with pd.ExcelWriter('C:/Users/RajContractor/Documents/Lion River/LR Reports/Managed Funds/DescriptionsMap_UAT.xlsx') as writer:
                 descriptions_map_df.to_excel(writer,sheet_name='Substituted Descriptions') 
                 split_descriptions_map_df.to_excel(writer,sheet_name='Split Descriptions')
         else:
             # Use the UAT import files
-            with pd.ExcelWriter('C:/Users/AnonAnon/Documents/Lion River/LR Reports/Managed Funds/DescriptionsMap_DEV.xlsx') as writer:
+            with pd.ExcelWriter('C:/Users/RajContractor/Documents/Lion River/LR Reports/Managed Funds/DescriptionsMap_DEV.xlsx') as writer:
                 descriptions_map_df.to_excel(writer,sheet_name='Substituted Descriptions') 
                 split_descriptions_map_df.to_excel(writer,sheet_name='Split Descriptions')
         
@@ -2372,6 +2884,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                                     ,src_row    
                                     ,src_row       
                                     ,dst_rows
+                                    ,month_end_dates=[]
                                     ,fx_rates=None
                                     ,investee_fund=False)
 
@@ -2412,6 +2925,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                                     ,transfer_row    
                                     ,transfer_row       
                                     ,dst_rows
+                                    ,month_end_dates=[]
                                     ,fx_rates=None
                                     ,investee_fund=False)
 
@@ -2421,6 +2935,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                                     ,src_row    
                                     ,src_row       
                                     ,dst_rows
+                                    ,month_end_dates=[]
                                     ,fx_rates=None
                                     ,investee_fund=False)
             elif (row['transfer_ind'] ==1 and row['transfer'] > 0 and row['issue'] > 0):
@@ -2459,6 +2974,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                                     ,src_row    
                                     ,src_row       
                                     ,dst_rows
+                                    ,month_end_dates=[]
                                     ,fx_rates=None
                                     ,investee_fund=False)
 
@@ -2468,6 +2984,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                                     ,transfer_row    
                                     ,transfer_row       
                                     ,dst_rows
+                                    ,month_end_dates=[]
                                     ,fx_rates=None
                                     ,investee_fund=False)
             else:   
@@ -2492,6 +3009,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                                     ,transfer_row    
                                     ,transfer_row       
                                     ,dst_rows
+                                    ,month_end_dates=[]
                                     ,fx_rates=None
                                     ,investee_fund=False)
                   
@@ -2504,6 +3022,9 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                     #print(f"Investor: {investor} Date: {input_row['date']} Add: {add_row_ind}")
 
                     if add_row_ind:
+                        if share == 'T Shares' and (x_investor is None or x_investor != investor):
+                            x_investor = investor
+                            print(f"Investor: {investor}\tIssue Total: {issue_tot}\tIssue: {issue}\tRatio: {issue/issue_tot}")
                         src_row = {
                             'commitment': 0,
                             'commitment_euros': 0,
@@ -2533,6 +3054,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                                             ,src_row    
                                             ,src_row       
                                             ,dst_rows
+                                            ,month_end_dates=[]
                                             ,fx_rates=None
                                             ,investee_fund=False)
                     
@@ -2820,7 +3342,7 @@ def migrate_managed_data(input_file, dst_file, env='UAT', debug=False):
                 print(f"{share} - {dst_rows.loc[i[0],'fund_op_type']} removed")
                 dst_rows_copy = dst_rows_copy.drop([i[0]])
     dst_rows = dst_rows_copy
-    dst_rows_loc = 'C:/Users/AnonAnon/Documents/Python Files/Dev/LR Migration/Migrated/dst_rows.xlsx'
+    dst_rows_loc = 'C:/Users/RajContractor/Documents/Python Files/Dev/LR Migration/Migrated/dst_rows.xlsx'
     dst_rows.to_excel(dst_rows_loc,index=False)
 
     # ---------------------13---------------------
@@ -3048,14 +3570,14 @@ def bespoke_changes(dst_rows,share):
 ######################################################################################
 #                                   Bank Operations                                  #
 ######################################################################################
-def migrate_investee_fund_op_bank_ops(fund_ops, dest_file, env='UAT'):
+def migrate_investee_fund_op_bank_ops(fund_ops, dest_file, env='PROD'):
     """ Inputs:
             fund_ops: a dataframe of all investee fund ops
             dst_file: the absolute path to the destination file the transformed data will be saved under 
         Extract the relevant data from our investee fund ops and rearrange it to fit the bank ops import template 
     """
     # Read in the template file - this already has the starting balances
-    template_file = 'C:/Users/AnonAnon/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Template.xlsx'
+    template_file = 'C:/Users/RajContractor/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Template.xlsx'
     wb = oxl.load_workbook(template_file)
     # dst_active_sheet = wb.create_sheet('Investee Fund Ops', 0)
     dst_active_sheet = wb.active
@@ -3065,11 +3587,15 @@ def migrate_investee_fund_op_bank_ops(fund_ops, dest_file, env='UAT'):
     # Read in the official bank ops linked to each fund 
     if env == 'UAT':
         # Use the UAT import files
-        bank_account_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/10 Link Bank Accounts to Fund, Company, Investor - TODO!.xlsx'
+        bank_account_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/10 Link Bank Accounts to Fund, Company, Investor - TODO!.xlsx'
+    elif env == 'PROD':
+        fund_bank_account_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/10.1 Link Bank Accounts to Fund.xlsx'
     else:
         # Use the DEV import files
-        bank_account_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/10 DEV Link Bank Accounts to Fund, Company, Investor.xlsx'
-    bank_accounts = pd.read_excel(bank_account_file,index_col=None,skiprows=[0,2,3]) 
+        bank_account_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/10 DEV Link Bank Accounts to Fund, Company, Investor.xlsx'
+    h_bank_accounts = pd.read_excel(fund_bank_account_file,index_col=None,skiprows=[0,2,3],sheet_name='Historic data')
+    c_bank_accounts = pd.read_excel(fund_bank_account_file,index_col=None,skiprows=[0,2,3],sheet_name='Catch up data') 
+    fund_bank_accounts = h_bank_accounts.append(c_bank_accounts,ignore_index=True)
 
     # Read the data we need to transform
     fund_ops = fund_ops.fillna(0)
@@ -3081,15 +3607,15 @@ def migrate_investee_fund_op_bank_ops(fund_ops, dest_file, env='UAT'):
         else:
             # Get the bank accounts 
             investee_fund = fund_op.FUND2
-            if investee_fund in list(bank_accounts['FUND7']):
-                investee_fund_bank_account = bank_accounts[bank_accounts['FUND7']==investee_fund].iloc[0]['ACCOUNTCODE1']
+            if investee_fund in list(fund_bank_accounts['FUND7']):
+                investee_fund_bank_account = fund_bank_accounts.loc[fund_bank_accounts['FUND7']==investee_fund,'ACCOUNTCODE1'].iloc[0]
             else:
                 if investee_fund not in missing_bank_accounts:
                     missing_bank_accounts.append(investee_fund)
                 investee_fund_bank_account = None
             managed_fund = fund_op.FUND18_MV
-            if managed_fund in list(bank_accounts['FUND7']):
-                managed_fund_bank_account = bank_accounts[bank_accounts['FUND7']==managed_fund].iloc[0]['ACCOUNTCODE1']
+            if managed_fund in list(fund_bank_accounts['FUND7']):
+                managed_fund_bank_account = fund_bank_accounts.loc[fund_bank_accounts['FUND7']==managed_fund,'ACCOUNTCODE1'].iloc[0]
             else:
                 if managed_fund not in missing_bank_accounts:
                     missing_bank_accounts.append(managed_fund)
@@ -3145,36 +3671,44 @@ def migrate_investee_fund_op_bank_ops(fund_ops, dest_file, env='UAT'):
                 amount_fund_ccy = -amount_fund_ccy
                 amount_investor_ccy = -amount_investor_ccy
 
+            current_date = None
+            index = 1
             if amount_investor_ccy != amount_investor_ccy or amount_investor_ccy == 0:
                 # This is because often there are more fund ops in the fund ccy than the investor ccy - there should only be ~25 cases
                 pass 
                 # print('\tNo amount found:', managed_fund, investee_fund, fund_op.OTYPE1, fund_op.SETTLEMENTDATE1)
             else:
+                if current_date is None or current_date != fund_op.SETTLEMENTDATE1:
+                    index = 1
+                else: 
+                    index += 1
+                current_date = fund_op.SETTLEMENTDATE1
+
                 amount_investor_ccy = round(amount_investor_ccy,2)
                 amount_fund_ccy = round(amount_fund_ccy,2)
                 dst_active_sheet[f'A{dst_row_num}'] = ''                                # -------------------------------------- BankOperation - LEAVE BLAN
                 dst_active_sheet[f'B{dst_row_num}'] = ''                                # -------------------------------------- PaymentAllocation - LEAVE BLANK
-                dst_active_sheet[f'C{dst_row_num}'] = fund_op.SETTLEMENTDATE1               # -------------------------------------- Bank Op Date CLOSEDATE1
-                dst_active_sheet[f'D{dst_row_num}'] = fund_op.CURRENCY31                    # -------------------------------------- Payment currency CURRENCY11
-                dst_active_sheet[f'E{dst_row_num}'] = bank_op_type                      # -------------------------------------- Bank Op Type OPTYPE1
-                dst_active_sheet[f'F{dst_row_num}'] = managed_fund                      # -------------------------------------- Managed Fund Name LINKEDENTITY
+                dst_active_sheet[f'C{dst_row_num}'] = fund_op.SETTLEMENTDATE1           # -------------------------------------- Bank Op Date CLOSEDATE1
+                dst_active_sheet[f'D{dst_row_num}'] = index                             # -------------------------------------- Index INDEXOP1
+                dst_active_sheet[f'E{dst_row_num}'] = fund_op.CURRENCY31                # -------------------------------------- Payment currency CURRENCY11
+                dst_active_sheet[f'F{dst_row_num}'] = bank_op_type                      # -------------------------------------- Bank Op Type OPTYPE1
                 dst_active_sheet[f'G{dst_row_num}'] = 'Fund'                            # -------------------------------------- Entity Type XX_ENTITYCLASS
-                dst_active_sheet[f'H{dst_row_num}'] = managed_fund                      # -------------------------------------- Entity Name in Bank Op FUND5
-                dst_active_sheet[f'I{dst_row_num}'] = 'Fund'                            # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS
-                dst_active_sheet[f'J{dst_row_num}'] = investee_fund                     # -------------------------------------- Counterparty Fund.Fund FUND_CF
-                dst_active_sheet[f'K{dst_row_num}'] = investee_fund_bank_account        # -------------------------------------- Bank Account BANKACCOUNTC1
-                dst_active_sheet[f'L{dst_row_num}'] = managed_fund_bank_account         # -------------------------------------- Bank Account ACCOUNTCODE2
-                dst_active_sheet[f'M{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
-                dst_active_sheet[f'N{dst_row_num}'] = amount_fund_ccy                   # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
-                dst_active_sheet[f'O{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
-                dst_active_sheet[f'P{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
+                dst_active_sheet[f'I{dst_row_num}'] = managed_fund                      # -------------------------------------- Entity Name in Bank Op LINKEDENTITY
+                dst_active_sheet[f'I{dst_row_num}'] = managed_fund                      # -------------------------------------- Entity Name in Bank Op FUND5
+                dst_active_sheet[f'J{dst_row_num}'] = managed_fund_bank_account         # -------------------------------------- Bank Account ACCOUNTCODE2
+                dst_active_sheet[f'K{dst_row_num}'] = 'Fund'                            # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS
+                dst_active_sheet[f'L{dst_row_num}'] = investee_fund                     # -------------------------------------- Counterparty Fund.Fund FUND_CF
+                dst_active_sheet[f'M{dst_row_num}'] = investee_fund_bank_account        # -------------------------------------- Bank Account BANKACCOUNTC1
+                dst_active_sheet[f'N{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
+                dst_active_sheet[f'O{dst_row_num}'] = amount_fund_ccy                   # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
+                dst_active_sheet[f'P{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
+                dst_active_sheet[f'Q{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
                 #(AMOUNTCB1 - VCBANKACCTOP.AMOUNTCB - Counterparty Bank Currency)          
-                dst_active_sheet[f'Q{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Draft DRAFT1
-                dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
-                dst_active_sheet[f'S{dst_row_num}'] = fund_op.SETTLEMENTDATE1           # -------------------------------------- CLOSEDATE22
-                dst_active_sheet[f'T{dst_row_num}'] = fund_op.INDEXOP1                  # -------------------------------------- INDEXOP22
-                dst_active_sheet[f'U{dst_row_num}'] = fund_op.OTYPE1                    # -------------------------------------- Fund Op Type OTYPE22
-                dst_active_sheet[f'V{dst_row_num}'] = ''                                # -------------------------------------- Comment
+                dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Draft DRAFT1
+                dst_active_sheet[f'S{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
+                dst_active_sheet[f'T{dst_row_num}'] = fund_op.SETTLEMENTDATE1           # -------------------------------------- CLOSEDATE22
+                dst_active_sheet[f'U{dst_row_num}'] = fund_op.INDEXOP1                  # -------------------------------------- INDEXOP22
+                dst_active_sheet[f'V{dst_row_num}'] = fund_op.OTYPE1                    # -------------------------------------- Fund Op Type OTYPE22
                 dst_row_num += 1
 
     wb.save(dest_file)
@@ -3187,14 +3721,14 @@ def migrate_investee_fund_op_bank_ops(fund_ops, dest_file, env='UAT'):
             print(f'\t\t{investor}')
             logging.warning(f'\t\t{investor}')
 
-def migrate_managed_fund_op_bank_ops(input_file, dest_file, env='UAT'):
+def migrate_managed_fund_op_bank_ops(input_file, dest_file, env='PROD'):
     """ Inputs:
             input_file: the absolute path to the source file
             dst_file: the absolute path to the destination file the transformed data will be saved under 
         Extract the relevant data from our investee fund ops and rearrange it to fit the bank ops import template 
     """
     # Read in the template file - this already has the starting balances
-    template_file = 'C:/Users/AnonAnon/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Template.xlsx'
+    template_file = 'C:/Users/RajContractor/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Template_Alt.xlsx'
     wb = oxl.load_workbook(template_file)
     # dst_active_sheet = wb.create_sheet('Managed Fund Ops', 0)
     dst_active_sheet = wb.active
@@ -3203,11 +3737,17 @@ def migrate_managed_fund_op_bank_ops(input_file, dest_file, env='UAT'):
 
     # Read in the official bank ops linked to each fund 
     if env == 'UAT':
-        bank_account_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/10 Link Bank Accounts to Fund, Company, Investor - TODO!.xlsx'
+        bank_account_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/10 Link Bank Accounts to Fund, Company, Investor - TODO!.xlsx'
+    elif env == 'PROD':
+        fund_bank_account_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/10.1 Link Bank Accounts to Fund.xlsx'
+        inv_bank_account_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/10.3 Link Bank Accounts to Investor.xlsx'
     else:
-        bank_account_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/10 DEV Link Bank Accounts to Fund, Company, Investor.xlsx'
-    share_bank_accounts = pd.read_excel(bank_account_file,index_col=None,skiprows=[0,2,3])
-    investor_bank_accounts = pd.read_excel(bank_account_file,index_col=None,sheet_name='Link to Investor',skiprows=[0,2,3])
+        bank_account_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/10 DEV Link Bank Accounts to Fund, Company, Investor.xlsx'
+    
+    investor_bank_accounts = pd.read_excel(inv_bank_account_file,index_col=None,sheet_name='Link to Investor',skiprows=[0,2,3])
+    h_bank_accounts = pd.read_excel(fund_bank_account_file,index_col=None,skiprows=[0,2,3],sheet_name='Historic data')
+    c_bank_accounts = pd.read_excel(fund_bank_account_file,index_col=None,skiprows=[0,2,3],sheet_name='Catch up data') 
+    share_bank_accounts = h_bank_accounts.append(c_bank_accounts,ignore_index=True)
 
     # Read the data we need to transform
     all_fund_ops = pd.read_excel(input_file,index_col=None,skiprows=[0,2,3])
@@ -3215,11 +3755,16 @@ def migrate_managed_fund_op_bank_ops(input_file, dest_file, env='UAT'):
     missing_bank_accounts = []
     fund_ops = fund_ops.fillna(0)
 
+    current_date = None
+    index = 1
     for fund_op in fund_ops.itertuples():
-
-        if fund_op.OTYPE1 in ['MF: Net Asset Value','MF: Other','MF: Commitment']:
+        if fund_op.OTYPE1 in ['MF: Net Asset Value','MF: Other','MF: Commitment','MF: Transfer']:
             pass
         else:
+            if current_date is None or current_date != fund_op.SETTLEMENTDATE1:
+                index = 1
+            else: 
+                index += 1
             # Insert the values in the destination row 
             #fund_op.OTYPE1              # Fund Op Type
             #fund_op.FUND2               # Share 
@@ -3231,6 +3776,18 @@ def migrate_managed_fund_op_bank_ops(input_file, dest_file, env='UAT'):
             #fund_op.COMMITTEDAMOUNT111  # Committed Amount
             #fund_op.AMOUNT98111         # Nominal 	 
             #fund_op.AMOUNT99111         # Premium
+            #fund_op.AMOUNT96111         # Share Dist: Return of Nominal
+
+            #fund_op.AMOUNT13111         # Share Dist: Dividends
+            #fund_op.AMOUNT23111         # Share Dist: Withholding Tax
+            #fund_op.AMOUNT83111         # Share Valuation pre-carried
+            #fund_op.AMOUNT111           # Amount (transfer)
+            #fund_op.YY_AMMOUNT98           # Allocation 
+            #fund_op.YY_AMMOUNT99           # Allocation 
+            #fund_op.YY_AMMOUNT97           # Allocation 
+            #fund_op.YY_AMMOUNT13           # Allocation 
+            #fund_op.YY_AMMOUNT23           # Allocation Fund Dist: Withholding Tax
+
             #fund_op.AMOUNT86111         # Fair Value
             #fund_op.AMOUNT97111         # Return of Premium  
 
@@ -3250,16 +3807,18 @@ def migrate_managed_fund_op_bank_ops(input_file, dest_file, env='UAT'):
                 # Call
                 amount_investor_ccy = fund_op.AMOUNT98111 + fund_op.AMOUNT99111
                 bank_op_type = 'Payment'
-            elif fund_op.OTYPE1 in ['MF: Mixed operation','MF: Transfer']:
+            elif fund_op.OTYPE1 in ['MF: Mixed operation']:
                 # Mixed operation
-                amount_investor_ccy = fund_op.AMOUNT98111 + fund_op.AMOUNT99111 - fund_op.AMOUNT97111
+                #amount_investor_ccy = fund_op.AMOUNT98111 + fund_op.AMOUNT99111 - fund_op.AMOUNT97111 - fund_op.AMOUNT96111
+                amount_investor_ccy = fund_op.AMOUNT98111 + fund_op.AMOUNT99111 - fund_op.AMOUNT97111 - fund_op.AMOUNT13111 + fund_op.AMOUNT23111
                 if amount_investor_ccy >= 0:
                     bank_op_type = 'Payment'
                 else:
                     bank_op_type = 'Receipt'
             elif fund_op.OTYPE1 == 'MF: Distribution':
                 # Distributions
-                amount_investor_ccy = fund_op.AMOUNT97111
+                #amount_investor_ccy = fund_op.AMOUNT97111 + fund_op.AMOUNT96111 - fund_op.AMOUNT23111 
+                amount_investor_ccy = fund_op.AMOUNT97111 + fund_op.AMOUNT13111 - fund_op.AMOUNT23111
                 bank_op_type = 'Receipt'
             elif fund_op.OTYPE1 == 'MF: Return Of Call (Negative Call)':
                 # Return of Call
@@ -3274,26 +3833,28 @@ def migrate_managed_fund_op_bank_ops(input_file, dest_file, env='UAT'):
                 dst_active_sheet[f'A{dst_row_num}'] = ''                                # -------------------------------------- BankOperation - LEAVE BLAN
                 dst_active_sheet[f'B{dst_row_num}'] = ''                                # -------------------------------------- PaymentAllocation - LEAVE BLANK
                 dst_active_sheet[f'C{dst_row_num}'] = fund_op.CLOSEDATE1                # -------------------------------------- Bank Op Date CLOSEDATE1
-                dst_active_sheet[f'D{dst_row_num}'] = fund_op.CURRENCY31                # -------------------------------------- Payment currency CURRENCY11
-                dst_active_sheet[f'E{dst_row_num}'] = bank_op_type                      # -------------------------------------- Bank Op Type OPTYPE1
-                dst_active_sheet[f'F{dst_row_num}'] = investor                          # -------------------------------------- Managed Fund Name LINKEDENTITY
-                dst_active_sheet[f'G{dst_row_num}'] = 'Investor Account'                # -------------------------------------- Entity Type XX_ENTITYCLASS
-                dst_active_sheet[f'H{dst_row_num}'] = investor                          # -------------------------------------- Entity Name in Bank Op FUND5
-                dst_active_sheet[f'I{dst_row_num}'] = 'Fund'                            # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS
-                dst_active_sheet[f'J{dst_row_num}'] = share                             # -------------------------------------- Counterparty Fund.Fund FUND_CF
-                dst_active_sheet[f'K{dst_row_num}'] = share_bank_account                # -------------------------------------- Bank Account BANKACCOUNTC1
-                dst_active_sheet[f'L{dst_row_num}'] = investor_bank_account             # -------------------------------------- Bank Account ACCOUNTCODE2
-                dst_active_sheet[f'M{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
-                dst_active_sheet[f'N{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
-                dst_active_sheet[f'O{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
-                dst_active_sheet[f'P{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
+                dst_active_sheet[f'D{dst_row_num}'] = index                             # -------------------------------------- Payment currency INDEXOP1
+                #dst_active_sheet[f'E{dst_row_num}'] = fund_op.CURRENCY31                # -------------------------------------- Payment currency CURRENCY11
+                dst_active_sheet[f'E{dst_row_num}'] = 'EUR'                             # -------------------------------------- Payment currency CURRENCY11
+                dst_active_sheet[f'F{dst_row_num}'] = bank_op_type                      # -------------------------------------- Bank Op Type OPTYPE1
+                dst_active_sheet[f'G{dst_row_num}'] = 'Investor'                        # -------------------------------------- Entity Type XX_ENTITYCLASS
+                dst_active_sheet[f'H{dst_row_num}'] = investor                          # -------------------------------------- Managed Fund Name LINKEDENTITY
+                dst_active_sheet[f'I{dst_row_num}'] = investor                          # -------------------------------------- Entity Name in Bank Op FUND5
+                dst_active_sheet[f'J{dst_row_num}'] = investor_bank_account             # -------------------------------------- Bank Account ACCOUNTCODE2
+                dst_active_sheet[f'K{dst_row_num}'] = 'Fund'                            # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS
+                dst_active_sheet[f'L{dst_row_num}'] = share                             # -------------------------------------- Counterparty Fund.Fund FUND_CF
+                dst_active_sheet[f'M{dst_row_num}'] = share_bank_account                # -------------------------------------- Bank Account BANKACCOUNTC1
+                dst_active_sheet[f'N{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
+                dst_active_sheet[f'O{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
+                dst_active_sheet[f'P{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
+                dst_active_sheet[f'Q{dst_row_num}'] = amount_investor_ccy               # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
                 #(AMOUNTCB1 - VCBANKACCTOP.AMOUNTCB - Counterparty Bank Currency)          
-                dst_active_sheet[f'Q{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Draft DRAFT1
-                dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
-                dst_active_sheet[f'S{dst_row_num}'] = fund_op.CLOSEDATE1                # -------------------------------------- CLOSEDATE22
-                dst_active_sheet[f'T{dst_row_num}'] = fund_op.INDEXOP1                  # -------------------------------------- INDEXOP22
-                dst_active_sheet[f'U{dst_row_num}'] = fund_op.OTYPE1                    # -------------------------------------- Fund Op Type OTYPE22
-                dst_active_sheet[f'V{dst_row_num}'] = ''                                # -------------------------------------- Comment
+                dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Draft DRAFT1
+                dst_active_sheet[f'S{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
+                dst_active_sheet[f'T{dst_row_num}'] = fund_op.CLOSEDATE1                # -------------------------------------- CLOSEDATE22
+                dst_active_sheet[f'U{dst_row_num}'] = fund_op.INDEXOP1                  # -------------------------------------- INDEXOP22
+                dst_active_sheet[f'V{dst_row_num}'] = fund_op.OTYPE1                    # -------------------------------------- Fund Op Type OTYPE22
+                dst_active_sheet[f'W{dst_row_num}'] = ''                                # -------------------------------------- Comment
                 dst_row_num += 1
 
     wb.save(dest_file)
@@ -3313,14 +3874,15 @@ def migrate_cash_transfer_bank_ops(dest_file):
         Extract the relevant data from the cash transfers file and rearrange it to fit the bank ops import template 
     """
     # Read in the template file - this already has the starting balances
-    template_file = 'C:/Users/AnonAnon/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Test.xlsx'
+    #template_file = 'C:/Users/RajContractor/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Test.xlsx'
+    template_file = 'C:/Users/RajContractor/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Template_Alt.xlsx'
     wb = oxl.load_workbook(template_file)
     # dst_active_sheet = wb.create_sheet('Cash Transfers', 0)
     dst_active_sheet = wb.active
     dst_active_sheet.title = 'Cash Transfers'
     dst_row_num = 5 # Ignore headers and overwrite the starting balances
 
-    cash_transfers_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/LR Data Files/Cash Transfers/Cash Pool BNP.xlsx'
+    cash_transfers_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/LR Data Files/Cash Transfers/Cash Pool BNP.xlsx'
     cash_transfers = pd.read_excel(cash_transfers_file,index_col=None)
 
     # Drop totals row
@@ -3339,6 +3901,8 @@ def migrate_cash_transfer_bank_ops(dest_file):
     cash_transfers.columns = [c.replace('/', '_') for c in cash_transfers.columns]
     cash_transfers.columns = [c.replace('.', '_') for c in cash_transfers.columns]
     
+    current_date = None
+    index = 1
     for cash_transfer in cash_transfers.itertuples():
      
         if cash_transfer.Bedrag_EUR >= 0:
@@ -3350,56 +3914,63 @@ def migrate_cash_transfer_bank_ops(dest_file):
             rabo_bank_op_type = 'Cash Transfer Out'
             amount = -cash_transfer.Bedrag_EUR
 
+        if current_date is None or current_date != cash_transfer.SETTLEMENTDATE1:
+            index = 1
+        else: 
+            index += 1
+
         # Cash Pool Entry
         dst_active_sheet[f'A{dst_row_num}'] = ''                                # -------------------------------------- BankOperation - LEAVE BLAN
         dst_active_sheet[f'B{dst_row_num}'] = ''                                # -------------------------------------- PaymentAllocation - LEAVE BLANK
         dst_active_sheet[f'C{dst_row_num}'] = cash_transfer.Boek_datum          # -------------------------------------- Bank Op Date CLOSEDATE1
-        dst_active_sheet[f'D{dst_row_num}'] = cash_transfer.Eigen_valuta        # -------------------------------------- Payment currency CURRENCY11
-        dst_active_sheet[f'E{dst_row_num}'] = cp_bank_op_type                   # -------------------------------------- Bank Op Type OPTYPE1
-        dst_active_sheet[f'F{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Managed Fund Name LINKEDENTITY
+        dst_active_sheet[f'D{dst_row_num}'] = index                             # -------------------------------------- Index INDEXOP1
+        dst_active_sheet[f'E{dst_row_num}'] = cash_transfer.Eigen_valuta        # -------------------------------------- Payment currency CURRENCY11
+        dst_active_sheet[f'F{dst_row_num}'] = cp_bank_op_type                   # -------------------------------------- Bank Op Type OPTYPE1
         dst_active_sheet[f'G{dst_row_num}'] = 'Fund'                            # -------------------------------------- Entity Type XX_ENTITYCLASS
-        dst_active_sheet[f'H{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Entity Name in Bank Op FUND5
-        dst_active_sheet[f'I{dst_row_num}'] = 'Fund'                            # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS
-        dst_active_sheet[f'J{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Counterparty Fund.Fund FUND_CF
-        dst_active_sheet[f'K{dst_row_num}'] = 'Cash Pool BNP'                   # -------------------------------------- Bank Account BANKACCOUNTC1
-        dst_active_sheet[f'L{dst_row_num}'] = 'Rabobank EUR'                    # -------------------------------------- Bank Account ACCOUNTCODE2
-        dst_active_sheet[f'M{dst_row_num}'] = amount                            # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
-        dst_active_sheet[f'N{dst_row_num}'] = amount                            # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
-        dst_active_sheet[f'O{dst_row_num}'] = amount                            # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
-        dst_active_sheet[f'P{dst_row_num}'] = amount                            # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
+        dst_active_sheet[f'H{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Entity LINKEDENTITY
+        dst_active_sheet[f'I{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Entity Name in Bank Op FUND5
+        dst_active_sheet[f'J{dst_row_num}'] = 'Rabobank EUR'                    # -------------------------------------- Bank Account ACCOUNTCODE2
+        dst_active_sheet[f'K{dst_row_num}'] = 'Fund'                            # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS
+        dst_active_sheet[f'L{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Counterparty Fund.Fund FUND_CF
+        dst_active_sheet[f'M{dst_row_num}'] = 'Cash Pool BNP'                   # -------------------------------------- Bank Account BANKACCOUNTC1
+        dst_active_sheet[f'N{dst_row_num}'] = amount                            # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
+        dst_active_sheet[f'O{dst_row_num}'] = amount                            # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
+        dst_active_sheet[f'P{dst_row_num}'] = amount                            # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
+        dst_active_sheet[f'Q{dst_row_num}'] = amount                            # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
         #(AMOUNTCB1 - VCBANKACCTOP.AMOUNTCB - Counterparty Bank Currency)          
-        dst_active_sheet[f'Q{dst_row_num}'] = 'FALSE'                            # -------------------------------------- Draft DRAFT1
-        dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
-        dst_active_sheet[f'S{dst_row_num}'] = cash_transfer.Boek_datum          # -------------------------------------- CLOSEDATE22
-        dst_active_sheet[f'T{dst_row_num}'] = 1                                 # -------------------------------------- INDEXOP22
-        dst_active_sheet[f'U{dst_row_num}'] = ''                                # -------------------------------------- Fund Op Type OTYPE22
-        dst_active_sheet[f'V{dst_row_num}'] = cash_transfer.Tekst               # -------------------------------------- Comment
+        dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Draft DRAFT1
+        dst_active_sheet[f'S{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
+        dst_active_sheet[f'T{dst_row_num}'] = cash_transfer.Boek_datum          # -------------------------------------- CLOSEDATE22
+        dst_active_sheet[f'U{dst_row_num}'] = 1                                 # -------------------------------------- INDEXOP22
+        dst_active_sheet[f'V{dst_row_num}'] = ''                                # -------------------------------------- Fund Op Type OTYPE22
+        dst_active_sheet[f'W{dst_row_num}'] = cash_transfer.Tekst              # -------------------------------------- Comment
         dst_row_num += 1
 
         # Rabobank Entry 
         dst_active_sheet[f'A{dst_row_num}'] = ''                                # -------------------------------------- BankOperation - LEAVE BLAN
         dst_active_sheet[f'B{dst_row_num}'] = ''                                # -------------------------------------- PaymentAllocation - LEAVE BLANK
         dst_active_sheet[f'C{dst_row_num}'] = cash_transfer.Boek_datum          # -------------------------------------- Bank Op Date CLOSEDATE1
-        dst_active_sheet[f'D{dst_row_num}'] = cash_transfer.Eigen_valuta        # -------------------------------------- Payment currency CURRENCY11
-        dst_active_sheet[f'E{dst_row_num}'] = rabo_bank_op_type                 # -------------------------------------- Bank Op Type OPTYPE1
-        dst_active_sheet[f'F{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Managed Fund Name LINKEDENTITY
+        dst_active_sheet[f'D{dst_row_num}'] = index                             # -------------------------------------- Index INDEXOP1
+        dst_active_sheet[f'E{dst_row_num}'] = cash_transfer.Eigen_valuta        # -------------------------------------- Payment currency CURRENCY11
+        dst_active_sheet[f'F{dst_row_num}'] = rabo_bank_op_type                 # -------------------------------------- Bank Op Type OPTYPE1
         dst_active_sheet[f'G{dst_row_num}'] = 'Fund'                            # -------------------------------------- Entity Type XX_ENTITYCLASS
-        dst_active_sheet[f'H{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Entity Name in Bank Op FUND5
-        dst_active_sheet[f'I{dst_row_num}'] = 'Fund'                            # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS
-        dst_active_sheet[f'J{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Counterparty Fund.Fund FUND_CF
-        dst_active_sheet[f'K{dst_row_num}'] = 'Rabobank EUR'                    # -------------------------------------- Bank Account BANKACCOUNTC1
-        dst_active_sheet[f'L{dst_row_num}'] = 'Cash Pool BNP'                   # -------------------------------------- Bank Account ACCOUNTCODE2
-        dst_active_sheet[f'M{dst_row_num}'] = amount                            # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
-        dst_active_sheet[f'N{dst_row_num}'] = amount                            # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
-        dst_active_sheet[f'O{dst_row_num}'] = amount                            # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
-        dst_active_sheet[f'P{dst_row_num}'] = amount                            # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
+        dst_active_sheet[f'H{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Managed Fund Name LINKEDENTITY
+        dst_active_sheet[f'I{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Entity Name in Bank Op FUND5
+        dst_active_sheet[f'J{dst_row_num}'] = 'Cash Pool BNP'                   # -------------------------------------- Bank Account ACCOUNTCODE2
+        dst_active_sheet[f'K{dst_row_num}'] = 'Fund'                            # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS        
+        dst_active_sheet[f'L{dst_row_num}'] = 'A Shares - LR'                   # -------------------------------------- Counterparty Fund.Fund FUND_CF
+        dst_active_sheet[f'M{dst_row_num}'] = 'Rabobank EUR'                    # -------------------------------------- Bank Account BANKACCOUNTC1
+        dst_active_sheet[f'N{dst_row_num}'] = amount                            # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
+        dst_active_sheet[f'O{dst_row_num}'] = amount                            # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
+        dst_active_sheet[f'P{dst_row_num}'] = amount                            # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
+        dst_active_sheet[f'Q{dst_row_num}'] = amount                            # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
         #(AMOUNTCB1 - VCBANKACCTOP.AMOUNTCB - Counterparty Bank Currency)          
-        dst_active_sheet[f'Q{dst_row_num}'] = 'FALSE'                            # -------------------------------------- Draft DRAFT1
-        dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
-        dst_active_sheet[f'S{dst_row_num}'] = cash_transfer.Boek_datum          # -------------------------------------- CLOSEDATE22
-        dst_active_sheet[f'T{dst_row_num}'] = 1                                 # -------------------------------------- INDEXOP22
-        dst_active_sheet[f'U{dst_row_num}'] = ''                                # -------------------------------------- Fund Op Type OTYPE22
-        dst_active_sheet[f'V{dst_row_num}'] = cash_transfer.Tekst               # -------------------------------------- Comment
+        dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                            # -------------------------------------- Draft DRAFT1
+        dst_active_sheet[f'S{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
+        dst_active_sheet[f'T{dst_row_num}'] = cash_transfer.Boek_datum          # -------------------------------------- CLOSEDATE22
+        dst_active_sheet[f'U{dst_row_num}'] = 1                                 # -------------------------------------- INDEXOP22
+        dst_active_sheet[f'V{dst_row_num}'] = ''                                # -------------------------------------- Fund Op Type OTYPE22
+        dst_active_sheet[f'W{dst_row_num}'] = cash_transfer.Tekst               # -------------------------------------- Comment
         dst_row_num += 1
 
     wb.save(dest_file)
@@ -3410,7 +3981,7 @@ def migrate_managed_fee_bank_ops(dest_file,env='UAT'):
         Extract the relevant data from the managed fund fees file and rearrange it to fit the bank ops import template 
     """
    # Read in the template file - this already has the starting balances
-    template_file = 'C:/Users/AnonAnon/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Test.xlsx'
+    template_file = 'C:/Users/RajContractor/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Test.xlsx'
     wb = oxl.load_workbook(template_file)
     # dst_active_sheet = wb.create_sheet('Managed Fees', 0)
     dst_active_sheet = wb.active
@@ -3419,11 +3990,14 @@ def migrate_managed_fee_bank_ops(dest_file,env='UAT'):
 
     # Read in managed fees data and format it 
     if env == 'UAT':
-        managed_fees_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/15 Managed Fund Fees.xlsx'
-        investor_bank_accounts_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/10 Link Bank Accounts to Fund, Company, Investor - TODO!.xlsx'
+        managed_fees_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/15 Managed Fund Fees.xlsx'
+        investor_bank_accounts_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/10 Link Bank Accounts to Fund, Company, Investor - TODO!.xlsx'
+    elif env == 'PROD':
+        managed_fees_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/15 Managed Fund Fees.xlsx'
+        investor_bank_accounts_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/10 Link Bank Accounts to Fund, Company, Investor - TODO!.xlsx'
     else:
-        managed_fees_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/15 DEV Managed Fund Fees.xlsx'
-        investor_bank_accounts_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/10 DEV Link Bank Accounts to Fund, Company, Investor.xlsx'
+        managed_fees_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/15 DEV Managed Fund Fees.xlsx'
+        investor_bank_accounts_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/10 DEV Link Bank Accounts to Fund, Company, Investor.xlsx'
     managed_fees = pd.read_excel(managed_fees_file,index_col=None,skiprows=[0,2,3],sheet_name = 'Managed Fees') 
     managed_fees.drop(columns=['Fee','Standard','IQREGIONID1','DRAFT1'],inplace=True)
     # managed_fees['SETTLEMENTDATE1'] = managed_fees['SETTLEMENTDATE1'].apply(lambda x: dt.date(x.year,x.month,x.day)) # - some nulls here
@@ -3496,13 +4070,13 @@ def migrate_managed_fee_bank_ops(dest_file,env='UAT'):
 
     wb.save(dest_file)
 
-def migrate_fee_and_income_bank_ops(dest_file,env='UAT'):
+def migrate_fee_and_income_bank_ops(dest_file,env='PROD'):
     """ Inputs:
             dst_file: the absolute path to the destination file the transformed data will be saved under 
         Extract the relevant data from the managed fund fees file and rearrange it to fit the bank ops import template 
     """
     # Read in the template file - this already has the starting balances
-    template_file = 'C:/Users/AnonAnon/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Test.xlsx'
+    template_file = 'C:/Users/RajContractor/OneDrive - IT-Venture Ltd/Documents/Temp/BankOp_Template_Alt_2.xlsx'
     wb = oxl.load_workbook(template_file)
     # dst_active_sheet = wb.create_sheet('Fees and Incomes', 0)
     dst_active_sheet = wb.active
@@ -3511,16 +4085,27 @@ def migrate_fee_and_income_bank_ops(dest_file,env='UAT'):
 
     # Read in fees data and merge it together
     if env == 'UAT':
-        fees_and_incomes = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/17 Fees and Incomes.xlsx'
-        investor_bank_accounts_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/10 Link Bank Accounts to Fund, Company, Investor - TODO!.xlsx'
+        fees_and_incomes = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/17 Fees and Incomes.xlsx'
+        investor_bank_accounts_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/2 UAT Import Files/10 Link Bank Accounts to Fund, Company, Investor - TODO!.xlsx'
+    elif env == 'PROD':
+        fees_and_incomes = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/13 Fees and Incomes.xlsx'
+        fund_bank_accounts_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/10.1 Link Bank Accounts to Fund.xlsx'
+        company_bank_accounts_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/10.2 Link Bank Accounts to Company.xlsx'
+        investor_bank_accounts_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/3 PROD Import Files/10.3 Link Bank Accounts to Investor.xlsx'
     else:
-        fees_and_incomes = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/17 Fees and Incomes.xlsx'
-        investor_bank_accounts_file = 'C:/Users/AnonAnon/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/10 DEV Link Bank Accounts to Fund, Company, Investor.xlsx'
-    fees = pd.read_excel(fees_and_incomes,index_col=None,usecols='C:W',skiprows=[0,2,3],sheet_name = 'FEES') 
-    income_tax = pd.read_excel(fees_and_incomes,index_col=None,usecols='C:W',skiprows=[0,2,3],sheet_name = 'FEES - CURRENT INCOME TAX')
-    incomes = pd.read_excel(fees_and_incomes,index_col=None,usecols='C:W',skiprows=[0,2,3],sheet_name = 'INCOMES')
-    fees = fees.append(income_tax, ignore_index=True)
-    fees = fees.append(incomes, ignore_index=True)
+        fees_and_incomes = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/17 Fees and Incomes.xlsx'
+        investor_bank_accounts_file = 'C:/Users/RajContractor/IT-Venture Ltd/Lion River - Documents/Import Files/ITV Import Files/1 DEV Import Files/10 DEV Link Bank Accounts to Fund, Company, Investor.xlsx'
+    fees = pd.read_excel(fees_and_incomes,index_col=None,usecols='C:W',skiprows=[0,2,3],sheet_name = 'Fees Q1')
+    fees_2 = pd.read_excel(fees_and_incomes,index_col=None,usecols='C:W',skiprows=[0,2,3],sheet_name = 'Fees - CIT Q1')
+    fees_3 = pd.read_excel(fees_and_incomes,index_col=None,usecols='C:W',skiprows=[0,2,3],sheet_name = 'Fees Q2 Q3')
+    fees_4 = pd.read_excel(fees_and_incomes,index_col=None,usecols='C:W',skiprows=[0,2,3],sheet_name = 'Fees - CIT Q2 Q3')
+    fees_5 = pd.read_excel(fees_and_incomes,index_col=None,usecols='C:W',skiprows=[0,2,3],sheet_name = 'Incomes Q1')
+    fees_6 = pd.read_excel(fees_and_incomes,index_col=None,usecols='C:W',skiprows=[0,2,3],sheet_name = 'Incomes Q2 Q3')
+    fees = fees.append(fees_2, ignore_index=True)
+    fees = fees.append(fees_3, ignore_index=True)
+    fees = fees.append(fees_4, ignore_index=True)
+    fees = fees.append(fees_5, ignore_index=True)
+    fees = fees.append(fees_6, ignore_index=True)
 
     fees.drop(columns=['FEESINVOICEDATE1','FEESINVOICENUMBER1','BANKACCOUNT1'],inplace=True)
     # replace EXP57 with 'Current Income Tax'
@@ -3528,23 +4113,31 @@ def migrate_fee_and_income_bank_ops(dest_file,env='UAT'):
     fees['REFERENCEDATE1'] = fees['REFERENCEDATE1'].apply(lambda x: dt.date(x.year,x.month,x.day))
     fees['EXPECTEDPAYMENTDATE1'] = fees['EXPECTEDPAYMENTDATE1'].apply(lambda x: dt.date(x.year,x.month,x.day))  
     # Drop all fees and incomes prior to 1st Jan 2021
-    fees = fees[fees['REFERENCEDATE1'] >= dt.date(2017,1,1)] #!!!! Check if this should be EXPECTEDPAYMENTDATE1, SETTLEMENTDATE1 or ACCOUNTINGDATE1
+    fees = fees[fees['REFERENCEDATE1'] >= dt.date(2021,1,1)] #!!!! Check if this should be REFERENCEDATE1, EXPECTEDPAYMENTDATE1, SETTLEMENTDATE1 or ACCOUNTINGDATE1
     
-    
+    fund_bank_accounts_h = pd.read_excel(fund_bank_accounts_file,index_col=None,skiprows=[0,2,3],sheet_name = 'Historic data')
+    fund_bank_accounts_c = pd.read_excel(fund_bank_accounts_file,index_col=None,skiprows=[0,2,3],sheet_name = 'Catch up data')
+    fund_bank_accounts = fund_bank_accounts_h.append(fund_bank_accounts_c,ignore_index=True)
+    fund_bank_accounts.drop(columns=['BankAccount','Standard'],inplace=True)
+    company_bank_accounts = pd.read_excel(company_bank_accounts_file,index_col=None,skiprows=[0,2,3],sheet_name = 'Link to Company')
+    company_bank_accounts.drop(columns=['BankAccount','Standard'],inplace=True)
     investor_bank_accounts = pd.read_excel(investor_bank_accounts_file,index_col=None,skiprows=[0,2,3],sheet_name = 'Link to Investor')
     investor_bank_accounts.drop(columns=['BankAccount','Standard'],inplace=True) 
-    company_bank_accounts = pd.read_excel(investor_bank_accounts_file,index_col=None,skiprows=[0,2,3],sheet_name = 'Link to Company')
-    company_bank_accounts.drop(columns=['BankAccount','Standard'],inplace=True)
-    fund_bank_accounts = pd.read_excel(investor_bank_accounts_file,index_col=None,skiprows=[0,2,3],sheet_name = 'Link to Fund')
-    fund_bank_accounts.drop(columns=['BankAccount','Standard'],inplace=True)
+
+
     missing_bank_accounts_companies = []
     missing_bank_accounts_funds = []
-
+    current_date = None
+    index = 1
     for fee in fees.itertuples():
         # Get the main party bank accounts
         # main_bank_account = fund_bank_accounts.loc[fund_bank_accounts['FUND7'] == managed_fee.FUND2,'ACCOUNTCODE1']
         main_bank_account = 'Rabobank EUR'
         main_party = fee.FUND2
+        if current_date is None or current_date != fee.SETTLEMENTDATE1:
+            index = 1
+        else: 
+            index += 1
 
         # Get the counterparty bank accounts
         if fee.NAME_CA == fee.NAME_CA:
@@ -3594,38 +4187,39 @@ def migrate_fee_and_income_bank_ops(dest_file,env='UAT'):
         dst_active_sheet[f'A{dst_row_num}'] = ''                                # -------------------------------------- BankOperation - LEAVE BLAN
         dst_active_sheet[f'B{dst_row_num}'] = ''                                # -------------------------------------- PaymentAllocation - LEAVE BLANK
         dst_active_sheet[f'C{dst_row_num}'] = fee.REFERENCEDATE1                # -------------------------------------- Bank Op Date CLOSEDATE1
-        dst_active_sheet[f'D{dst_row_num}'] = 'EUR'                             # -------------------------------------- Payment currency CURRENCY11
-        dst_active_sheet[f'E{dst_row_num}'] = bank_op_type                      # -------------------------------------- Bank Op Type OPTYPE1
-        dst_active_sheet[f'F{dst_row_num}'] = main_party                        # -------------------------------------- Managed Fund Name LINKEDENTITY
+        dst_active_sheet[f'D{dst_row_num}'] = index                             # -------------------------------------- Index INDEXOP1
+        dst_active_sheet[f'E{dst_row_num}'] = 'EUR'                             # -------------------------------------- Payment currency CURRENCY11
+        dst_active_sheet[f'F{dst_row_num}'] = bank_op_type                      # -------------------------------------- Bank Op Type OPTYPE1
         dst_active_sheet[f'G{dst_row_num}'] = 'Fund'                            # -------------------------------------- Entity Type XX_ENTITYCLASS
-        dst_active_sheet[f'H{dst_row_num}'] = main_party                        # -------------------------------------- Entity Name in Bank Op FUND5
-        dst_active_sheet[f'I{dst_row_num}'] = counterparty_type                 # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS
-        dst_active_sheet[f'J{dst_row_num}'] = ''                                # -------------------------------------- Counterparty Fund.Fund FUND_CF
-        dst_active_sheet[f'K{dst_row_num}'] = main_bank_account                 # -------------------------------------- Bank Account BANKACCOUNTC1
-        dst_active_sheet[f'L{dst_row_num}'] = cp_bank_account                   # -------------------------------------- Bank Account ACCOUNTCODE2
-        dst_active_sheet[f'M{dst_row_num}'] = amount                            # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
-        dst_active_sheet[f'N{dst_row_num}'] = amount                            # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
-        dst_active_sheet[f'O{dst_row_num}'] = amount                            # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
-        dst_active_sheet[f'P{dst_row_num}'] = amount                            # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
+        dst_active_sheet[f'H{dst_row_num}'] = main_party                        # -------------------------------------- Managed Fund Name LINKEDENTITY
+        dst_active_sheet[f'I{dst_row_num}'] = main_party                        # -------------------------------------- Entity Name in Bank Op FUND5
+        dst_active_sheet[f'J{dst_row_num}'] = cp_bank_account                   # -------------------------------------- Bank Account ACCOUNTCODE2
+        dst_active_sheet[f'K{dst_row_num}'] = counterparty_type                 # -------------------------------------- Counterparty Type XX_COUNTERPARTYCLASS
+        dst_active_sheet[f'L{dst_row_num}'] = ''                                # -------------------------------------- Counterparty Fund.Fund FUND_CF
+        dst_active_sheet[f'M{dst_row_num}'] = main_bank_account                 # -------------------------------------- Bank Account BANKACCOUNTC1
+        dst_active_sheet[f'N{dst_row_num}'] = amount                            # -------------------------------------- Amount (Bank) AMOUNT1 -- EUR
+        dst_active_sheet[f'O{dst_row_num}'] = amount                            # -------------------------------------- Amount (Counterparty) AMOUNTC1 -- USD
+        dst_active_sheet[f'P{dst_row_num}'] = amount                            # -------------------------------------- Amount (Payment) AMOUNT21 -- EUR
+        dst_active_sheet[f'Q{dst_row_num}'] = amount                            # -------------------------------------- Amount (Entity) AMOUNT31 -- EUR
         #(AMOUNTCB1 - VCBANKACCTOP.AMOUNTCB - Counterparty Bank Currency)          
-        dst_active_sheet[f'Q{dst_row_num}'] = 'TRUE'                            # -------------------------------------- Draft DRAFT1
-        dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
-        dst_active_sheet[f'S{dst_row_num}'] = fee.REFERENCEDATE1        # -------------------------------------- CLOSEDATE22
-        dst_active_sheet[f'T{dst_row_num}'] = fee.INDEXOP1              # -------------------------------------- INDEXOP22
-        dst_active_sheet[f'U{dst_row_num}'] = ''                                # -------------------------------------- Fund Op Type OTYPE22
-        dst_active_sheet[f'V{dst_row_num}'] = ''                                # -------------------------------------- Comment
-        dst_active_sheet[f'W{dst_row_num}'] = counterparty                      # -------------------------------------- Counterparty XX_COUNTERPARTY
+        dst_active_sheet[f'R{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Draft DRAFT1
+        dst_active_sheet[f'S{dst_row_num}'] = 'FALSE'                           # -------------------------------------- Locked XX_LOCKED
+        dst_active_sheet[f'T{dst_row_num}'] = fee.REFERENCEDATE1                # -------------------------------------- CLOSEDATE22
+        dst_active_sheet[f'U{dst_row_num}'] = fee.INDEXOP1                      # -------------------------------------- INDEXOP22
+        dst_active_sheet[f'V{dst_row_num}'] = ''                                # -------------------------------------- Fund Op Type OTYPE22
+        dst_active_sheet[f'W{dst_row_num}'] = ''                                # -------------------------------------- Comment
+        dst_active_sheet[f'X{dst_row_num}'] = counterparty                      # -------------------------------------- Counterparty XX_COUNTERPARTY
         dst_row_num += 1
 
     wb.save(dest_file)
 
     # Warn about any missing bank accounts
     
-    if len(missing_bank_accounts_companies) > 0:
-        print('\tNo bank account found for the following companies:')
-        for company in missing_bank_accounts_companies:
-            print('\t\t',company)
-    if len(missing_bank_accounts_funds) > 0:
-        print('\tNo bank account found for the following funds:')
-        for fund in missing_bank_accounts_funds:
-            print('\t\t',fund)
+    # if len(missing_bank_accounts_companies) > 0:
+    #     print('\tNo bank account found for the following companies:')
+    #     for company in missing_bank_accounts_companies:
+    #         print('\t\t',company)
+    # if len(missing_bank_accounts_funds) > 0:
+    #     print('\tNo bank account found for the following funds:')
+    #     for fund in missing_bank_accounts_funds:
+    #         print('\t\t',fund)

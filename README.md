@@ -9,7 +9,7 @@ The fund operation amounts were often classified using a text field in the sourc
 We did not require this code to be maintained or reused after the migration was complete. The emphasis was on speed rather than maintainability. 
 
 ## Key Files
-There are lots of different files in this repo. The most relevant files are:
+There are lots of different files in this repository. The most relevant files are:
 - mig_functions.py: this contains the majority of the code. It contains functions that are used by the other files. There will be docstrings to explain what each function does. 
 - investee_fund_ops.py: this file collates all source data files and calls the relevant functions to migrate data for investee funds 
 - managed_fund_ops.py: this file collates all source data files and calls the relevant functions to migrate data for managed funds
